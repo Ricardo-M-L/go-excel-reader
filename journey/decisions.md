@@ -7,7 +7,7 @@ places where more than one answer was defensible and one had to be picked.
 
 ---
 
-## D1 — Install a newer Go toolchain rather than lower the module's floor
+## D1: Install a newer Go toolchain rather than lower the module's floor
 **2026-08-06**
 
 **Ambiguity:** The spec required Go 1.22+. The machine had 1.21.6, which refuses to build
@@ -15,7 +15,7 @@ a module declaring a newer version.
 
 **Chose:** Download and install Go 1.26.5 alongside the existing toolchain.
 
-**Why:** The alternative — declaring `go 1.21` in `go.mod` — silently changes the contract
+**Why:** The alternative, declaring `go 1.21` in `go.mod`, silently changes the contract
 the library publishes. `clear()` on a map and `b.Loop()` in benchmarks both need newer
 versions, and discovering that halfway through would mean rewriting working code.
 
@@ -23,7 +23,7 @@ versions, and discovering that halfway through would mean rewriting working code
 
 ---
 
-## D2 — Add two methods to an interface that was specified exactly
+## D2: Add two methods to an interface that was specified exactly
 **2026-08-06**
 
 **Ambiguity:** The target API was given precisely, with an instruction to "implement
@@ -33,7 +33,7 @@ exactly this." Two things it also specified could not be built against it.
 
 **Why:** A `Read() bool` cursor has nowhere to report a mid-stream failure, so a truncated
 file is indistinguishable from a short one. And `ReadAll` is specified to return an
-`error` — without `Err` on the interface, that error could only ever be `nil`. `ReadAll`
+`error`, and without `Err` on the interface that error could only ever be `nil`. `ReadAll`
 is likewise specified to return cells carrying a `Raw` field, and nothing else on the
 interface exposes raw text.
 
@@ -47,25 +47,25 @@ Widening an interface somebody specified on purpose deserves to be visible.
 
 ---
 
-## D3 — A leaf package for the value model, not duplication across three readers
+## D3: A leaf package for the value model, not duplication across three readers
 **2026-08-06**
 
 **Ambiguity:** The specified layout has `xlsx/`, `xls/` and `csv/` as siblings, with the
 public `Reader` in the root. Each backend needs to produce typed cells, and the root needs
-to consume them — which is an import cycle if the `Cell` type lives in the root.
+to consume them, which is an import cycle if the `Cell` type lives in the root.
 
 **Chose:** `internal/cells`, holding `Cell` and a `Source` interface. The root aliases
 `Cell` to it and implements every typed getter exactly once against `Source`.
 
 **Why:** The alternative is writing `GetInt` three times. Three copies of a coercion rule
-drift, and the drift is invisible — the day `xls` and `xlsx` disagree about whether
+drift, and the drift is invisible: the day `xls` and `xlsx` disagree about whether
 `GetInt` accepts a whole-numbered float, no test fails.
 
 **Traded:** One package not in the specified structure.
 
 ---
 
-## D4 — Refuse BIFF5 and earlier rather than guess
+## D4: Refuse BIFF5 and earlier rather than guess
 **2026-08-06**
 
 **Ambiguity:** The `.xls` container format predates BIFF8 by several versions. Older files
@@ -75,7 +75,7 @@ store text in a codepage declared by a `CODEPAGE` record instead of UTF-16.
 `ErrUnsupportedBIFF` for anything below BIFF8.
 
 **Why:** Partial support here fails silently. Decoding codepage bytes as if they were
-Latin-1 produces text that looks like text — mojibake, not an error — and a user has no
+Latin-1 produces text that looks like text. Mojibake, not an error, and a user has no
 way to tell a bad decode from a bad file. A clear refusal is more useful than plausible
 garbage.
 
@@ -83,7 +83,7 @@ garbage.
 
 ---
 
-## D5 — The shared string table as a byte blob, not a []string
+## D5: The shared string table as a byte blob, not a []string
 **2026-08-06**
 
 **Ambiguity:** The obvious representation of a string table is `[]string`. The spec
@@ -93,8 +93,8 @@ suggested indexing byte offsets and lazily re-reading for very large tables.
 streaming the XML.
 
 **Why:** True lazy re-reading is not actually available: the table lives inside a
-compressed zip member, so seeking backwards into it means re-inflating from the start —
-O(n²) across a full pass. The blob gets most of the benefit with none of that. For 400,000
+compressed zip member, so seeking backwards into it means re-inflating from the start,
+which is O(n²) across a full pass. The blob gets most of the benefit with none of that. For 400,000
 entries it is two allocations and zero pointers instead of 400,000 of each, and the
 garbage collector never traces into a `[]byte`.
 
@@ -105,7 +105,7 @@ README now says so.
 
 ---
 
-## D6 — No `unsafe.String`, despite the free win
+## D6: No `unsafe.String`, despite the free win
 **2026-08-06**
 
 **Ambiguity:** `SharedStrings.At` copies when converting a blob slice to a string.
@@ -123,7 +123,7 @@ justifies it.
 
 ---
 
-## D7 — Strict typed getters, except between int and float
+## D7: Strict typed getters, except between int and float
 **2026-08-06**
 
 **Ambiguity:** Should `GetString` on a numeric cell format the number? Should `GetFloat`
@@ -134,15 +134,15 @@ on `"3.5"` parse it?
 
 **Why:** Silent string-to-number coercion is how spreadsheet readers quietly corrupt data.
 The exception earns its place because whether a number lands as `int64` or `float64`
-depends on incidental details of how the file was written — which is not something a
+depends on incidental details of how the file was written, which is not something a
 caller should have to reason about. `Cell.Raw` is there for anyone who disagrees.
 
 ---
 
-## D8 — Emit the rows the file omitted
+## D8: Emit the rows the file omitted
 **2026-08-06**
 
-**Ambiguity:** A sheet whose first value is in row 5 contains no records for rows 1–4. A
+**Ambiguity:** A sheet whose first value is in row 5 contains no records for rows 1 to 4. A
 reader can skip them or synthesise them.
 
 **Chose:** Emit them as empty rows, so `RowIndex()` always matches the row number shown in
@@ -156,7 +156,7 @@ what ExcelDataReader does, which the parity check would have caught either way.
 
 ---
 
-## D9 — Type inference off by default for CSV
+## D9: Type inference off by default for CSV
 **2026-08-06**
 
 **Ambiguity:** The spec said treat CSV cells as strings by default, with inference
@@ -176,7 +176,7 @@ says which; a reader that picks one is wrong half the time and never says so.
 
 ---
 
-## D10 — Dates in UTC, always
+## D10: Dates in UTC, always
 **2026-08-06**
 
 **Chose:** Every `time.Time` returned is UTC.
@@ -187,7 +187,7 @@ anything that later formats them. Documented rather than left to be discovered.
 
 ---
 
-## D11 — Generate fixtures with three independent writers
+## D11: Generate fixtures with three independent writers
 **2026-08-06**
 
 **Ambiguity:** Fixtures could be written by this library, hand-built as byte slices, or
@@ -200,7 +200,7 @@ that either agrees with the format. The spec explicitly asked for real files rat
 mocked bytes.
 
 **Result:** This decision was made for the right reason and still nearly failed, because
-the *first* version used only openpyxl — which stores strings inline, leaving the shared
+the *first* version used only openpyxl, which stores strings inline, leaving the shared
 string reader untested. See `chapters/03-the-fixtures-that-tested-nothing.md`. Two writers
 that differ on a property you care about is the actual requirement; "third-party" alone is
 not enough.
@@ -210,28 +210,28 @@ large ones are generated, so `go get` doesn't pull 18 MB of test data.
 
 ---
 
-## D12 — Verify against the original, not only against my own expectations
+## D12: Verify against the original, not only against my own expectations
 **2026-08-06**
 
 **Ambiguity:** The spec listed "produces identical output to ExcelDataReader" as a success
 criterion without saying how to check it.
 
-**Chose:** Build two dumpers — one in C# against the real ExcelDataReader 3.9.0, one in Go
-— emitting a canonical line-per-cell form, and diff them.
+**Chose:** Build two dumpers, one in C# against the real ExcelDataReader 3.9.0 and one in
+Go, emitting a canonical line-per-cell form, and diff them.
 
 **Why:** Every other test in the project encodes what *I* believe the format means. This
 is the only check that can catch a misunderstanding I hold consistently.
 
 **Key detail:** numbers are emitted as raw IEEE 754 bit patterns (`%016X`), not as text.
 C# and Go disagree about how to render a `double`, and that disagreement would appear as a
-false difference on every non-integral value — noise that buries real differences.
+false difference on every non-integral value, which is noise that buries real differences.
 
 **Result:** Byte-identical on all twelve fixtures, including 1,000,000 cells. Setup cost
 about twenty minutes.
 
 ---
 
-## D13 — Cut v0.1.1 rather than move the v0.1.0 tag
+## D13: Cut v0.1.1 rather than move the v0.1.0 tag
 **2026-08-06**
 
 **Ambiguity:** The inaccurate memory claim was found after v0.1.0 was tagged, pushed, and
@@ -248,7 +248,7 @@ claim I couldn't defend. That record is the point.
 
 ---
 
-## D14 — Run against ExcelDataReader's own test corpus
+## D14: Run against ExcelDataReader's own test corpus
 **2026-08-06**
 
 **Ambiguity:** The library was tagged and green, verified byte-for-byte against the
@@ -271,11 +271,11 @@ something broader than it did.
 
 ---
 
-## D15 — Narrow the empty-string rule instead of keeping the first fix
+## D15: Narrow the empty-string rule instead of keeping the first fix
 **2026-08-06**
 
 **Ambiguity:** ExcelDataReader reports an empty inline string as absent. The obvious
-fix — treat empty text as an empty cell — repaired four corpus files and broke eight.
+fix, treating empty text as an empty cell, repaired four corpus files and broke eight.
 
 **Chose:** Apply the rule only to inline strings. Empty entries in the shared string
 table, and empty `LABEL` records in `.xls`, stay as the empty string.
@@ -293,7 +293,7 @@ straight back into the broken version.
 
 ---
 
-## D16 — Make the error-cell behaviour an option, defaulting to the reference
+## D16: Make the error-cell behaviour an option, defaulting to the reference
 **2026-08-06**
 
 **Ambiguity:** A cell holding `#DIV/0!` reads as absent in ExcelDataReader. This
@@ -312,20 +312,20 @@ alternative for anyone who does not read the docs.
 
 ---
 
-## D17 — Pin the corpus result with hashes of our own output
+## D17: Pin the corpus result with hashes of our own output
 **2026-08-06**
 
 **Ambiguity:** The corpus comparison needs .NET and a 379-file checkout, neither of
 which belongs in this repository or in CI. But an unpinned number in a README rots.
 
-**Chose:** Commit `testdata/corpus_baseline.tsv` — verdict plus a SHA-256 of *our*
+**Chose:** Commit `testdata/corpus_baseline.tsv`, holding the verdict plus a SHA-256 of *our*
 dump for each file. `TestCorpusBaselineShape` asserts the counts with no corpus
 present; `TestCorpusParity` re-derives every dump when `EXCEL_CORPUS` is set.
 
 **Why:** Hashing our own output is what removes the .NET dependency from the check.
 The hashes came from a run where the comparison really happened, so pinning them pins
 the parity result by proxy. Refreshing hashes deliberately does not re-derive the
-verdicts, which still require the full harness — so a change in what we agree on has
+verdicts, which still require the full harness, so a change in what we agree on has
 to be measured, not assumed.
 
 **Result:** The first generator was a shell script that hashed empty output for
@@ -336,13 +336,13 @@ making.
 
 ---
 
-## D18 — Buffer a bounded window of rows instead of assuming BIFF record order
+## D18: Buffer a bounded window of rows instead of assuming BIFF record order
 **2026-08-06**
 
 **Ambiguity:** The xls reader emitted a row whenever the row number changed, which
 assumes cell records arrive grouped by row and in increasing order. Nine corpus files
 proved otherwise: a sheet may emit MULBLANK records covering a block and only then the
-cells that fill it, so those sheets were reported twice — once blank, once populated.
+cells that fill it, so those sheets were reported twice: once blank, once populated.
 
 **Chose:** Accumulate rows in a map keyed by absolute row index, emitting only rows
 strictly below the highest one seen, with a 1024-row window.
@@ -356,7 +356,7 @@ The window rather than a whole sheet: a hostile file could otherwise force buffe
 capping worst-case memory.
 
 **Result:** Nine files fixed. The first implementation emitted the top buffered row
-before it was complete, truncating it — caught by an existing test at exactly the
+before it was complete, truncating it. An existing test caught that at exactly the
 window boundary.
 
 **Traded:** Peak memory for an xls sheet is now bounded by the window rather than by a
@@ -364,7 +364,7 @@ single row. xlsx is unaffected and still streams row by row.
 
 ---
 
-## D19 — Pin the reference implementation's timezone when comparing
+## D19: Pin the reference implementation's timezone when comparing
 **2026-08-06**
 
 **Ambiguity:** Several corpus files differed by exactly the local UTC offset.
@@ -386,7 +386,7 @@ condition is better than a claim that silently depends on where it was measured.
 
 ---
 
-## D20 — Bound every length taken from a file header
+## D20: Bound every length taken from a file header
 **2026-08-06**
 
 **Ambiguity:** `readDIFAT` used the header's FAT-sector count as an allocation capacity.
@@ -396,7 +396,7 @@ allocation and kills the process with a fatal out-of-memory.
 **Chose:** Reject counts exceeding what the file could physically contain, and bound
 `columnIndex` by the format's 16,384-column limit for the same reason.
 
-**Why:** A Go fatal out-of-memory is not recoverable — a caller cannot defend against it
+**Why:** A Go fatal out-of-memory is not recoverable, so a caller cannot defend against it
 the way it can against a panic. For any service accepting spreadsheet uploads this is a
 denial of service reachable with a file small enough to paste into a chat message.
 

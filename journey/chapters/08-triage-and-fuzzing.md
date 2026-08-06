@@ -1,4 +1,4 @@
-# Chapter 8 — Triaging 29 disagreements, and letting a machine write the inputs
+# Chapter 8: Triaging 29 disagreements, and letting a machine write the inputs
 
 *2026-08-06. The corpus said 214 of 303 matched. This is what the other 89 were.*
 
@@ -11,7 +11,7 @@ So: what are the 29?
 ## Sorting them before reading them
 
 The first useful move was not to open a single file. It was to classify all 29
-mechanically — do the two dumps name the *same cells* with different values, or
+mechanically. Do the two dumps name the *same cells* with different values, or
 different cells entirely?
 
 ```
@@ -40,9 +40,9 @@ So the comparison was rendering two of the reference's types through a path that
 guaranteed a mismatch. Some fraction of "differences" were my measuring
 instrument.
 
-Fixed — `DateTimeOffset` renders as UTC, `TimeSpan` as total seconds under its
-own tag — and re-ran. **Zero of the 29 resolved.** The harness was wrong *and*
-the differences were real. Worth knowing separately.
+Fixed, so that `DateTimeOffset` renders as UTC and `TimeSpan` as total seconds
+under its own tag, and re-ran. Zero of the 29 resolved. The harness was wrong
+*and* the differences were real. Worth knowing separately.
 
 ## The finding I did not expect
 
@@ -62,7 +62,7 @@ $ for tz in America/New_York UTC Asia/Tokyo; do TZ=$tz dotnet edrdump strict/Ope
   TZ=Asia/Tokyo         0  Sheet1  0  4  D  2009-01-01 02:00:00.000
 ```
 
-**ExcelDataReader's output depends on the machine's timezone.** The same bytes
+ExcelDataReader's output depends on the machine's timezone. The same bytes
 decode to three different instants. For OOXML strict files, which store dates as
 ISO 8601 text, it parses them and converts through the local zone.
 
@@ -81,12 +81,12 @@ The parity harness now pins `TZ=UTC` and says why.
 ## The real bugs
 
 **Locale date formats.** `Issue541` carried `numFmtId="55"` and no format string
-to inspect — id 55 is a built-in. My table covered ids 0–49.
+to inspect, because id 55 is a built-in. My table covered ids 0 to 49.
 
-Ids 27–36 and 50–58 are reserved for locale-specific formats and are *entirely*
+Ids 27 to 36 and 50 to 58 are reserved for locale-specific formats and are *entirely*
 dates: the Japanese, Chinese, Korean and Thai calendar layouts. ECMA-376 leaves
 their format strings undefined, so a file using one supplies nothing to
-pattern-match. A reader that only knows 0–49 silently returns a raw serial for
+pattern-match. A reader that only knows 0 to 49 silently returns a raw serial for
 every date in a CJK-locale workbook. Three files.
 
 **Impossible serials.** `Issue14_InvalidOADate` holds `1.0E12` with a genuine
@@ -109,10 +109,10 @@ read#75  RowIndex=0    cells=20  nonEmpty=20  "Group#"
 ```
 
 Seventy-five blank rows, and then row index *restarts at zero* with the data.
-The file emits MULBLANK records covering rows 0–74 and only afterwards the cells
+The file emits MULBLANK records covering rows 0 to 74 and only afterwards the cells
 that fill them. Every such sheet was reported twice: once empty, once populated.
 
-Reading the reference implementation settled it — `XlsWorksheet` buffers a block
+Reading the reference implementation settled it. `XlsWorksheet` buffers a block
 of rows and places cells by absolute index, precisely because BIFF makes no
 ordering guarantee within a row block.
 
@@ -127,11 +127,11 @@ if r.sheetOpen {
 ```
 
 That `complete--` is the whole correctness argument, and I got it wrong on the
-first attempt — emitting the top row early truncated it, which a test caught at
+first attempt. Emitting the top row early truncated it, which a test caught at
 row 1023, exactly where the buffer window ended.
 
 The window caps memory at 1024 rows so a hostile file cannot make the reader
-buffer a whole sheet. **Nine files.**
+buffer a whole sheet. Nine files.
 
 ## Result
 
@@ -143,7 +143,7 @@ buffer a whole sheet. **Nine files.**
 | Only ExcelDataReader reads | 27 | 27 |
 | Only this library reads | 0 | 0 |
 
-94% of files both readers accept. Sixteen fixed, one regressed — a single extra
+94% of files both readers accept. Sixteen fixed, one regressed: a single extra
 empty cell in `Issue158.xls`, which I attempted to fix, broke a different file
 with the guess, and reverted. It is still open, and one file is a better place
 to stop than a second speculative change.
@@ -158,8 +158,8 @@ believe is wrong of it), and four are untriaged.
 The corpus is 303 files that exist because a human hit a bug. Fuzzing is the
 same idea with the human removed.
 
-Three targets, one property: **for any input, reading either returns an error or
-produces rows — never a panic, a hang, or an unbounded allocation.** Correctness
+Three targets, one property: for any input, reading either returns an error or
+produces rows, and never panics, hangs, or allocates without bound. Correctness
 on garbage is not the goal. Refusing it safely is.
 
 The important detail is seeding. Random bytes are rejected by magic-byte
@@ -167,7 +167,7 @@ detection in microseconds and exercise nothing. Seeding with the real fixtures
 means mutations still reach the ZIP directory, the CFB allocation table and the
 BIFF record loop, which is where the arithmetic lives.
 
-**Twenty-five seconds in:**
+Twenty-five seconds in:
 
 ```
 runtime: out of memory: cannot allocate 17179869184-byte block
@@ -192,8 +192,8 @@ This is worse than a panic. A panic is recoverable; a Go fatal out-of-memory is
 not. Any service accepting `.xls` uploads could be killed by a file small enough
 to fit in a tweet.
 
-The fix is to bound the claim by physical reality — a file cannot contain more
-FAT sectors than it contains sectors:
+The fix is to bound the claim by physical reality. A file cannot contain more FAT
+sectors than it contains sectors:
 
 ```go
 maxSectors := c.size/int64(c.sectorSize) + 1
@@ -216,13 +216,13 @@ ordinary test forever.
 
 They found completely different bugs, and neither would have found the other's.
 
-The corpus found **semantic** errors — right structure, wrong meaning. A locale
+The corpus found *semantic* errors: right structure, wrong meaning. A locale
 date id I had never heard of. A serial out of range. Records in an order I did
 not know was legal. Every one required a real file produced by real software
 doing something reasonable, and no fuzzer would have generated a valid workbook
 with `numFmtId="55"`.
 
-The fuzzer found a **safety** error — a number used without asking whether it
+The fuzzer found a *safety* error: a number used without asking whether it
 could be true. No human would ever write a file claiming four billion FAT
 sectors, so it will never appear in any corpus, and it is the one that gets your
 service killed.

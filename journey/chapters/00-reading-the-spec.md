@@ -1,4 +1,4 @@
-# Chapter 0 — Reading the spec before running it
+# Chapter 0: Reading the spec before running it
 
 *2026-08-06. No parsing code yet. This is what happened before any.*
 
@@ -6,7 +6,7 @@ Yesterday's lesson was to check a plan against reality before executing it. This
 up much better. It named the BIFF record numbers, the CFB magic bytes, the four RK
 encodings and a gotchas table that turned out to be accurate on every entry.
 
-So the review found fewer errors — but the ones it found were the kind that are expensive
+So the review found fewer errors, but the ones it found were the kind that are expensive
 to discover halfway through.
 
 ## The toolchain didn't exist
@@ -45,8 +45,8 @@ type Cell struct {
 Two things here cannot both be true.
 
 `ReadAll` takes a `Reader` and returns an `error`. But nothing on `Reader` reports an
-error — `Read()` returns `bool`. So a file that is corrupt halfway through looks exactly
-like a file that ended. `ReadAll`'s error could only ever be `nil`.
+error, since `Read()` returns `bool`. So a file that is corrupt halfway through looks
+exactly like a file that ended. `ReadAll`'s error could only ever be `nil`.
 
 `ReadAll` also returns `Row`s of `Cell`s, and a `Cell` carries `Raw`. Nothing on `Reader`
 exposes raw text. `GetValue` returns the typed value only. So `ReadAll` cannot populate
@@ -72,9 +72,9 @@ The spec was clear about scope, and I kept it:
 | BIFF5 and earlier `.xls` | Refused with a clear error. See below. |
 
 The BIFF5 decision is the one worth stating. Older `.xls` files store text in a codepage
-declared by a `CODEPAGE` record rather than UTF-16. Partial support there fails *silently*
-— decoding codepage bytes as Latin-1 produces text that looks like text. Mojibake, not an
-error. A user has no way to distinguish a bad decode from a bad file.
+declared by a `CODEPAGE` record rather than UTF-16. Partial support there fails
+*silently*, because decoding codepage bytes as Latin-1 produces text that looks like text.
+Mojibake, not an error. A user has no way to distinguish a bad decode from a bad file.
 
 So the reader parses the `BOF` record, checks the version, and refuses anything below
 BIFF8 with a message naming the version it found. A clear refusal beats plausible garbage.
@@ -88,7 +88,7 @@ Building xlsx first would mean stubbing date detection, then coming back. So `nu
 first, out of order.
 
 Worth noting because the spec also said never to leave a TODO in place. Those two
-instructions conflict if you follow the phase order literally — the honest way to satisfy
+instructions conflict if you follow the phase order literally. The honest way to satisfy
 "no stubs" is to build the dependency first and reorder the phases.
 
 ## One structural addition
@@ -102,7 +102,7 @@ live in the root if the backends must name it.
 The fix is a leaf package, `internal/cells`, holding `Cell` and a `Source` interface. The
 root aliases `Cell` to it and implements every typed getter *once* against `Source`.
 
-The alternative — `GetInt` written three times — is worse than it looks. Three copies of a
+The alternative, `GetInt` written three times, is worse than it looks. Three copies of a
 coercion rule drift, and the drift is invisible: the day `xls` and `xlsx` disagree about
 whether `GetInt` accepts a whole-numbered float, nothing fails.
 
@@ -111,6 +111,6 @@ whether `GetInt` accepts a whole-numbered float, nothing fails.
 Nothing dramatic. One toolchain install, two interface methods, one package, one reorder.
 
 None of it needed spreadsheet expertise. It needed reading the spec as a document that
-could be wrong, rather than as instructions — the same move as yesterday, applied to a
-plan that was mostly right. The errors were smaller because the plan was better. They were
-not zero, and the interface one would have shipped.
+could be wrong, rather than as instructions. The same move as yesterday, applied to a plan
+that was mostly right. The errors were smaller because the plan was better. They were not
+zero, and the interface one would have shipped.

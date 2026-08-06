@@ -1,23 +1,23 @@
-# Chapter 4 — A filesystem inside a file, and one byte
+# Chapter 4: A filesystem inside a file, and one byte
 
 *2026-08-06. The `.xls` reader. The hardest code in the project, and it worked
-first try — which was not where the trouble came from.*
+first try, which was not where the trouble came from.*
 
 A modern `.xlsx` is a ZIP of XML you can read with two standard library packages.
 A legacy `.xls` is neither of those things.
 
-It is a **Compound File Binary** container — an entire filesystem, with sectors,
-a file allocation table, and a directory tree, inside one file. The spreadsheet
-lives in a stream inside it, as a flat sequence of binary records.
+It is a Compound File Binary container: an entire filesystem, with sectors, a file
+allocation table, and a directory tree, inside one file. The spreadsheet lives in
+a stream inside it, as a flat sequence of binary records.
 
 Nothing about the spreadsheet is visible until the filesystem works.
 
 ## Layer one: CFB
 
 Sectors are typically 512 bytes. A FAT chains them. A directory of 128-byte
-entries names the streams. There is a second, smaller allocation scheme — the
-"mini FAT" — for streams below 4096 bytes, which are packed into a stream
-belonging to the root entry rather than given whole sectors.
+entries names the streams. There is a second, smaller allocation scheme called the
+"mini FAT" for streams below 4096 bytes, which are packed into a stream belonging
+to the root entry rather than given whole sectors.
 
 Details that cost time:
 
@@ -46,8 +46,8 @@ Records are a 2-byte type, a 2-byte length, and a payload. `BOF`, `EOF`,
 `BOUNDSHEET`, `SST`, `LABELSST`, `NUMBER`, `RK`, `MULRK`, `BLANK`, `MULBLANK`,
 `BOOLERR`, `FORMULA`, `XF`, `FORMAT`, `DATEMODE`.
 
-`BOUNDSHEET` carries a sheet's name and an **absolute offset** to its own `BOF`,
-which is what makes sheet-at-a-time reading possible without scanning.
+`BOUNDSHEET` carries a sheet's name and an absolute offset to its own `BOF`, which
+is what makes sheet-at-a-time reading possible without scanning.
 
 ### RK: four encodings in four bytes
 
@@ -73,7 +73,7 @@ as one `SST` record followed by a run of `CONTINUE` records.
 Concatenate them and parse the result, and almost everything works.
 
 Almost. When a string's *characters* are split across a boundary, the first byte
-of the continuation is **not character data** — it restates the compression flag,
+of the continuation is not character data. It restates the compression flag,
 because the second half of a string may be stored differently from the first
 (BIFF8 stores text as UTF-16 unless every character fits in one byte).
 
@@ -82,7 +82,7 @@ desynchronises, and every string after that point comes back shifted by one byte
 and garbled.
 
 So the record reader keeps the boundary offsets instead of concatenating them
-away, and the check lives inside the character loop — which is exactly right,
+away, and the check lives inside the character loop, which is exactly right,
 because a boundary that falls *between* strings carries no flags byte:
 
 ```go
@@ -97,13 +97,13 @@ if c.atContinuation() {
 
 Two things make this actually tested rather than nominally tested.
 
-The fixture generator writes strings of **random length**, so the split lands
+The fixture generator writes strings of random length, so the split lands
 mid-string somewhere in 65,535 rows. A test then walks every row asserting the
 string still starts with `s<rowindex>-`, which proves the table stayed aligned
 across every boundary.
 
-And the unit test includes a **negative control**: it parses the same bytes
-*without* the boundary information and asserts the result comes out wrong.
+And the unit test includes a negative control. It parses the same bytes *without*
+the boundary information and asserts the result comes out wrong.
 
 ```go
 if got == "abcd" {
@@ -118,8 +118,8 @@ nothing to do with the code. Chapter 3 is why that control exists.
 ## Refusing rather than guessing
 
 BIFF5 and earlier store text in a codepage declared by a `CODEPAGE` record rather
-than UTF-16. Supporting them halfway fails *silently* — decoding codepage bytes
-as Latin-1 produces text that looks like text.
+than UTF-16. Supporting them halfway fails *silently*, because decoding codepage
+bytes as Latin-1 produces text that looks like text.
 
 So the reader parses `BOF`, checks the version, and refuses anything below BIFF8
 with a message naming what it found. That refusal accounts for most of the 27

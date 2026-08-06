@@ -1,4 +1,4 @@
-# Chapter 6 — The claim I couldn't defend
+# Chapter 6: The claim I couldn't defend
 
 *2026-08-06. v0.1.0 was tagged, pushed, and already fetched through the module
 proxy. Then someone asked a simple question.*
@@ -19,18 +19,18 @@ build, written in the present tense as though it were a finding.
 
 Rows *do* stream. That half is true and remains true.
 
-But the shared string table is held **fully resident**. It is the one structure
-that is not streamed, by design (chapter 2), and on a string-heavy workbook it
-*is* the memory profile — roughly 30 of the 39 MB. Memory tracks the number of
-distinct strings, not the widest row and not the file size.
+But the shared string table is held fully resident. It is the one structure that
+is not streamed, by design (chapter 2), and on a string-heavy workbook it *is* the
+memory profile, roughly 30 of the 39 MB. Memory tracks the number of distinct
+strings, not the widest row and not the file size.
 
 Nobody had challenged it. It had been true of nothing I measured, and it shipped.
 
 ## Measuring instead
 
 The fix was to build the experiment the claim implies. Two workbooks with
-**identical** row and cell counts — 200,000 rows, 1,000,000 cells — differing
-only in how many distinct strings they contain:
+identical row and cell counts, 200,000 rows and 1,000,000 cells, differing only in
+how many distinct strings they contain:
 
 | Workbook | Distinct strings | Peak Go heap | Peak RSS |
 |---|---|---|---|
@@ -48,10 +48,9 @@ The honest statement is longer and worth more: *rows stream in constant memory;
 memory scales with the number of distinct strings; most real spreadsheets repeat
 their values heavily, so it usually stays near the baseline.*
 
-Plus the caveat that belongs next to it: **this is not a constant-memory
-reader.** A workbook with millions of distinct strings will hold that table, and
-no amount of streaming elsewhere avoids it. What is avoided is paying three times
-over for it.
+Plus the caveat that belongs next to it: this is not a constant-memory reader. A
+workbook with millions of distinct strings will hold that table, and no amount of
+streaming elsewhere avoids it. What is avoided is paying three times over for it.
 
 ## Pinning the right thing
 
@@ -64,19 +63,19 @@ Both numbers are now tests, and the *baseline* one matters more than the total:
 const baselineBudget = 20 << 20
 ```
 
-If row streaming regressed into accumulation, the string-heavy fixture would
-still look plausible — it is *supposed* to use tens of megabytes, so a regression
+If row streaming regressed into accumulation, the string-heavy fixture would still
+look plausible, because it is *supposed* to use tens of megabytes, so a regression
 hides inside the expected number. The repeating fixture has nowhere to hide.
 
-A single test on the big file would have passed through the regression. Two
-tests, separating the baseline from the thing that legitimately grows, is what
-makes either of them meaningful.
+A single test on the big file would have passed through the regression. Two tests,
+separating the baseline from the thing that legitimately grows, is what makes
+either of them meaningful.
 
 ## Fix forward, don't move the tag
 
 v0.1.0 was already cached by the module proxy. Moving a published tag means two
-different trees answer to the same version — worse than an inaccurate sentence
-for a few hours.
+different trees answer to the same version, which is worse than an inaccurate
+sentence for a few hours.
 
 So: v0.1.1, and a permanent record that the first release shipped a claim I could
 not defend. That record is the useful part.
@@ -90,13 +89,13 @@ sounded measured and wasn't. Same failure, different layer:
 otherwise.**
 
 The specific tell is worth naming. "Peak memory tracks the widest row" is a
-statement about a *relationship between variables* — and I had never varied
-either one. I measured one file, once, and wrote a sentence describing a curve.
+statement about a *relationship between variables*, and I had never varied either
+one. I measured one file, once, and wrote a sentence describing a curve.
 
 Any claim of the form "X scales with Y" needs at least two points, and they need
 to differ in Y and nothing else. `repeat.xlsx` exists for exactly that reason and
 took four minutes to generate.
 
 A number you did not measure is a claim, and a claim in a README is a claim you
-will eventually have to defend — usually to someone asking a perfectly friendly
+will eventually have to defend, usually to someone asking a perfectly friendly
 question.

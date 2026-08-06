@@ -1,4 +1,4 @@
-# Chapter 2 — Streaming xlsx, and the table everything turns on
+# Chapter 2: Streaming xlsx, and the table everything turns on
 
 *2026-08-06. The xlsx reader. Worked on the first test run, which turned out to
 mean less than it sounded like.*
@@ -28,10 +28,10 @@ declaring a struct.
 
 Details that cost time:
 
-- **Column letters are bijective base-26.** There is no zero digit: `A`–`Z` are
-  1–26 and `AA` is 27, which maps to zero-based index 26. Ordinary base-26 puts
-  `AA` at 27 and shifts every column past `Z` by one. `XFD`, Excel's last column,
-  is index 16383 and is a test case.
+- **Column letters are bijective base-26.** There is no zero digit, so `A` to `Z`
+  are 1 to 26 and `AA` is 27, which maps to zero-based index 26. Ordinary base-26
+  puts `AA` at 27 and shifts every column past `Z` by one. `XFD`, Excel's last
+  column, is index 16383 and is a test case.
 - **`r` attributes are optional.** Streaming producers omit them, so both row and
   column positions need an implicit fallback. One corpus file later turned out to
   be entirely composed of this case.
@@ -52,7 +52,7 @@ Good for file size. Dangerous for a reader, because the obvious representation i
 
 - 400,000 separate heap allocations
 - 400,000 string headers, 16 bytes each, before any actual text
-- 400,000 pointers the garbage collector traces on **every** cycle
+- 400,000 pointers the garbage collector traces on every cycle
 
 Instead the table is one contiguous `[]byte` blob plus an `[]int64` offset index.
 Two allocations. Zero pointers. The GC never traces into a `[]byte`, so a
@@ -66,9 +66,9 @@ func (s *SharedStrings) At(i int) (string, bool) {
 ```
 
 The spec suggested indexing byte offsets and lazily re-reading very large tables
-from disk. That is not actually available: the table lives inside a *compressed*
-zip member, so seeking backwards means re-inflating from the start — O(n²) across
-a full pass. The blob gets most of the benefit with none of that.
+from disk. That is not actually available. The table lives inside a *compressed*
+zip member, so seeking backwards means re-inflating from the start, which is
+O(n²) across a full pass. The blob gets most of the benefit with none of that.
 
 This is the single decision most responsible for 40 MB against 95 MB and 221 MB.
 
@@ -90,8 +90,8 @@ numeric columns never pays for it. Three lines of bookkeeping.
 ## And then it all passed
 
 `TestXLSXSimple`, `TestXLSXTypes`, `TestXLSXMultiSheet`, `TestXLSXGaps`,
-`TestXLSXDates`, and the CSV suite — green on the first run. The memory benchmark
-reported 3.6 MB on a 4.6 MB file, comfortably inside a 50 MB budget.
+`TestXLSXDates`, and the CSV suite all went green on the first run. The memory
+benchmark reported 3.6 MB on a 4.6 MB file, comfortably inside a 50 MB budget.
 
 Every word of this chapter about the string table was, at that moment,
 unverified. See chapter 3.
