@@ -333,3 +333,76 @@ rejected files while the Go test wrote `REJECTED`, reporting seventeen false cha
 Regeneration now runs through the same function the check uses. The generator and the
 checker being two implementations of one idea is the same mistake this project keeps
 making.
+
+---
+
+## D18 — Buffer a bounded window of rows instead of assuming BIFF record order
+**2026-08-06**
+
+**Ambiguity:** The xls reader emitted a row whenever the row number changed, which
+assumes cell records arrive grouped by row and in increasing order. Nine corpus files
+proved otherwise: a sheet may emit MULBLANK records covering a block and only then the
+cells that fill it, so those sheets were reported twice — once blank, once populated.
+
+**Chose:** Accumulate rows in a map keyed by absolute row index, emitting only rows
+strictly below the highest one seen, with a 1024-row window.
+
+**Why:** ExcelDataReader buffers a block of rows and places cells by absolute index for
+exactly this reason; BIFF makes no ordering guarantee within a row block. Reading the
+reference settled a question that guessing would not have.
+
+The window rather than a whole sheet: a hostile file could otherwise force buffering of
+65,536 rows. A thousand covers every real displacement seen (the worst was 98) while
+capping worst-case memory.
+
+**Result:** Nine files fixed. The first implementation emitted the top buffered row
+before it was complete, truncating it — caught by an existing test at exactly the
+window boundary.
+
+**Traded:** Peak memory for an xls sheet is now bounded by the window rather than by a
+single row. xlsx is unaffected and still streams row by row.
+
+---
+
+## D19 — Pin the reference implementation's timezone when comparing
+**2026-08-06**
+
+**Ambiguity:** Several corpus files differed by exactly the local UTC offset.
+
+**Chose:** Run ExcelDataReader under `TZ=UTC` in the parity harness, and keep returning
+UTC unconditionally here.
+
+**Why:** ExcelDataReader parses OOXML strict ISO dates and converts them through the
+machine's local timezone: `strict/Open.xlsx` yields 16:00, 11:00 or 02:00 under
+New York, UTC and Tokyo. Under `TZ=UTC` it agrees with this library exactly, so the
+disagreement is not about the value but about whether the answer should depend on the
+host.
+
+Following the reference here would mean reproducing a bug. Pinning its timezone
+compares the two readers rather than two locales.
+
+**Traded:** "Byte-identical to ExcelDataReader" now carries a condition. Stating the
+condition is better than a claim that silently depends on where it was measured.
+
+---
+
+## D20 — Bound every length taken from a file header
+**2026-08-06**
+
+**Ambiguity:** `readDIFAT` used the header's FAT-sector count as an allocation capacity.
+Fuzzing found a 2 KB file declaring `0xFFFFFFFF` sectors, which asks for a 17 GB
+allocation and kills the process with a fatal out-of-memory.
+
+**Chose:** Reject counts exceeding what the file could physically contain, and bound
+`columnIndex` by the format's 16,384-column limit for the same reason.
+
+**Why:** A Go fatal out-of-memory is not recoverable — a caller cannot defend against it
+the way it can against a panic. For any service accepting spreadsheet uploads this is a
+denial of service reachable with a file small enough to paste into a chat message.
+
+The bound is derived from the file rather than picked: a compound file cannot contain
+more FAT sectors than it contains sectors.
+
+**Result:** 2.1 million fuzz executions across three targets afterwards with no further
+failures. The crashing input is committed under `testdata/fuzz/` and runs as a normal
+test.

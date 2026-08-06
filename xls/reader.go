@@ -40,22 +40,18 @@ type Reader struct {
 	// errorValues makes formula errors readable as their display text.
 	errorValues bool
 
-	// fetched holds a completed row that Read has not yet handed out, which
-	// happens while blank rows are being emitted to close an index gap.
-	fetched     []cells.Cell
-	fetchedRow  int
-	haveFetched bool
+	// buf holds rows assembled but not yet handed out, keyed by absolute row
+	// index. BIFF groups cells into row blocks and does not guarantee that
+	// records arrive in row order: a sheet may emit MULBLANK records covering
+	// a whole block and only then the cells that fill it. A reader that emits
+	// a row as soon as the row number changes reports such a sheet twice --
+	// once blank, once populated -- which is what this replaced.
+	buf         map[int][]cells.Cell
+	maxBuffered int
 
-	// pending holds cells belonging to the row after the one being assembled.
-	// A cell record announces its own row, so the first cell of the next row
-	// is only recognisable once it has already been read.
-	pending     []cells.Cell
-	pendingRow  int
-	havePending bool
-
-	nextRow int
-	row     []cells.Cell
-	rowIdx  int
+	emitNext int
+	row      []cells.Cell
+	rowIdx   int
 
 	err error
 }
@@ -191,8 +187,9 @@ func (r *Reader) NextSheet() bool {
 		return false
 	}
 
-	r.row, r.rowIdx, r.nextRow = nil, -1, 0
-	r.haveFetched, r.havePending = false, false
+	r.row, r.rowIdx, r.emitNext = nil, -1, 0
+	r.buf = make(map[int][]cells.Cell)
+	r.maxBuffered = -1
 	r.sheetOpen = true
 
 	// The BOUNDSHEET offset points straight at this sheet's BOF record, so no
@@ -210,83 +207,78 @@ func (r *Reader) NextSheet() bool {
 	return true
 }
 
+// maxBufferedRows bounds how far out of order cell records may arrive before
+// rows are emitted regardless.
+//
+// The window exists so that a hostile or corrupt file cannot make the reader
+// buffer an entire sheet. Real displacement is a row block, or occasionally a
+// whole leading run of blank rows; a thousand rows covers both with room to
+// spare while capping worst-case memory at something small.
+const maxBufferedRows = 1024
+
 // Read advances to the next row of the current sheet.
 //
 // Rows the file never wrote are still reported as empty rows, so RowIndex
 // always lines up with the row number Excel shows.
 func (r *Reader) Read() bool {
-	if !r.sheetOpen {
-		return false
-	}
-	if !r.haveFetched {
-		if !r.fetchRow() {
+	for {
+		// The highest buffered row may still be receiving cells, so while the
+		// sheet is open only rows strictly below it are complete. Emitting the
+		// top row early truncates it, which is a far worse failure than
+		// buffering one row longer.
+		complete := r.maxBuffered
+		if r.sheetOpen {
+			complete--
+		}
+
+		if r.emitNext <= complete {
+			if row, ok := r.buf[r.emitNext]; ok {
+				delete(r.buf, r.emitNext)
+				r.row, r.rowIdx = row, r.emitNext
+			} else {
+				// A row the file never wrote, below one that it did.
+				r.row, r.rowIdx = nil, r.emitNext
+			}
+			r.emitNext++
+			return true
+		}
+
+		if !r.sheetOpen {
 			return false
 		}
+		r.fill()
 	}
-
-	if r.fetchedRow > r.nextRow {
-		r.row = nil
-		r.rowIdx = r.nextRow
-		r.nextRow++
-		return true
-	}
-
-	r.row = r.fetched
-	r.rowIdx = r.fetchedRow
-	r.nextRow = r.rowIdx + 1
-	r.haveFetched = false
-	return true
 }
 
-// fetchRow assembles the next populated row from the record stream.
-func (r *Reader) fetchRow() bool {
-	var (
-		cur    []cells.Cell
-		curRow = -1
-	)
-	if r.havePending {
-		cur, curRow = r.pending, r.pendingRow
-		r.pending, r.havePending = nil, false
-	}
-
-	for {
+// fill reads cell records into the row buffer until the sheet ends or the
+// buffer reaches its window.
+func (r *Reader) fill() {
+	for r.sheetOpen {
 		if err := r.rr.next(); err != nil {
 			if !errors.Is(err, io.EOF) {
 				r.noteErr(err)
 			}
 			r.sheetOpen = false
-			return r.finishRow(cur, curRow)
+			return
 		}
-
 		if r.rr.typ == recEOF {
 			r.sheetOpen = false
-			return r.finishRow(cur, curRow)
+			return
 		}
 
 		row, placed, ok := r.decodeCellRecord()
 		if !ok {
 			continue
 		}
-
-		if curRow == -1 {
-			curRow = int(row)
+		idx := int(row)
+		r.buf[idx] = mergeCells(r.buf[idx], placed)
+		if idx > r.maxBuffered {
+			r.maxBuffered = idx
 		}
-		if int(row) != curRow {
-			// The record belongs to a later row, so the row being assembled is
-			// complete. Hold the new cells until the next call.
-			r.pending, r.pendingRow, r.havePending = placed, int(row), true
-			return r.finishRow(cur, curRow)
+		if len(r.buf) >= maxBufferedRows {
+			return
 		}
-		cur = mergeCells(cur, placed)
 	}
-}
-
-func (r *Reader) finishRow(cur []cells.Cell, curRow int) bool {
-	if curRow < 0 {
-		return false
-	}
-	r.fetched, r.fetchedRow, r.haveFetched = cur, curRow, true
-	return true
 }
 
 // mergeCells overlays src onto dst, growing dst as needed.
@@ -519,7 +511,9 @@ func (r *Reader) readFollowingString() (string, error) {
 
 // numericCell types a stored double using the cell's number format.
 func (r *Reader) numericCell(xf uint16, v float64) cells.Cell {
-	if r.isDateXF(int(xf)) {
+	// A date format on an out-of-range serial is a formatting accident, not a
+	// date. Converting anyway produces a confident absurdity.
+	if r.isDateXF(int(xf)) && numfmt.SerialInRange(v) {
 		return cells.Cell{Value: numfmt.SerialToTime(v, r.date1904), Raw: formatFloat(v)}
 	}
 	// A whole number is returned as int64 so that a column of counts reads the

@@ -164,20 +164,20 @@ spreadsheets its maintainers collected because each one broke something.
 
 | Result | Files |
 |---|---|
-| Byte-identical to ExcelDataReader | **214** |
+| Byte-identical to ExcelDataReader | **229** |
 | Both readers refuse (xlsb, encrypted, corrupt) | 33 |
-| Both read it, output differs | 29 |
+| Both read it, output differs | 14 |
 | Only ExcelDataReader reads it | 27 |
 | Only this library reads it | **0** |
 
-88% of the files both readers accept decode identically. The last row is the one
+94% of the files both readers accept decode identically. The last row is the one
 that would worry me: nothing here parses a file the reference implementation
 rejects, which would mean inventing data.
 
 The 27 gaps are mostly BIFF5-and-earlier `.xls` and encrypted workbooks, both
-refused deliberately. The 29 differences are tracked in
-`testdata/corpus_baseline.tsv`, and a test pins the counts so that trading
-agreement for something else has to be a deliberate act.
+refused deliberately. The 14 differences are listed in
+`testdata/corpus_baseline.tsv` and summarised below, and a test pins the counts
+so that trading agreement for something else has to be a deliberate act.
 
 Running it needs a corpus checkout; the committed baseline hashes let the
 regression check run without .NET:
@@ -186,6 +186,12 @@ regression check run without .NET:
 git clone --depth 1 https://github.com/ExcelDataReader/ExcelDataReader /tmp/edr
 EXCEL_CORPUS=/tmp/edr/src/TestData go test -run TestCorpus ./...
 ```
+
+**Run the reference under `TZ=UTC`.** ExcelDataReader converts OOXML strict ISO
+dates through the machine's local timezone, so the same file decodes to
+different values on different hosts — `strict/Open.xlsx` yields 16:00, 11:00 or
+02:00 depending on `TZ`. This library always returns UTC, which is why the
+comparison pins the reference's timezone rather than following it.
 
 The project's own fixtures are produced by three independent writers (openpyxl,
 xlsxwriter and xlwt) so that the tests exercise the format rather than agreeing
@@ -199,6 +205,34 @@ inline versus shared — and a test asserts that both representations stay cover
 | Formula error cell (`#DIV/0!`) | no value | no value; `WithErrorValues(true)` returns the text |
 | Raw cell text | not exposed | always available via `Cell(col).Raw` |
 | Mid-stream failure | throws | reported by `Err()` |
+| OOXML strict ISO dates | converted via local timezone | always UTC |
+| Elapsed-time cells (`[h]:mm`) | `TimeSpan` | `time.Time` on the epoch |
+| Leading/trailing spaces in shared strings | trimmed | preserved, per `xml:space="preserve"` |
+
+The last three account for 12 of the 14 remaining corpus differences. The other
+two are open and untriaged.
+
+## Fuzzing
+
+Both binary parsers do extensive arithmetic on lengths and offsets taken
+straight from the file, which is attacker-controlled input for any service that
+accepts uploads.
+
+```bash
+go test -fuzz=FuzzOpenReader -fuzztime=5m .
+go test -fuzz=FuzzOpenXLS -fuzztime=5m .
+go test -fuzz=FuzzDetect -fuzztime=5m .
+```
+
+The targets assert one property: for any input, reading either returns an error
+or produces rows — never a panic, hang, or unbounded allocation. Seeds are the
+committed fixtures, so mutations reach the ZIP directory, the CFB allocation
+table and the BIFF record loop rather than being turned away by magic bytes.
+
+This found a real denial of service: a compound file could declare
+`0xFFFFFFFF` FAT sectors, and that count was used directly as an allocation
+size, so a 2 KB file could request 17 GB and kill the process. Fixed in v0.3.0
+and kept as a regression case in `testdata/fuzz/`.
 
 ## Not supported in v0.1.0
 

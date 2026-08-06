@@ -78,7 +78,40 @@ var builtinDateIDs = map[int]bool{
 }
 
 // IsDateBuiltin reports whether a built-in numFmtId always denotes a date or time.
-func IsDateBuiltin(id int) bool { return builtinDateIDs[id] }
+//
+// Beyond the well-known ids, two ranges are reserved for locale-specific
+// formats and are entirely dates: 27-36 and 50-58 hold the Japanese, Chinese,
+// Korean and Thai calendar layouts. ECMA-376 leaves their format strings
+// undefined, so a file using one supplies no <numFmt> to inspect and there is
+// nothing to pattern-match. A reader that only knows ids 0-49 silently returns
+// a raw serial for every date in a CJK-locale workbook.
+func IsDateBuiltin(id int) bool {
+	if builtinDateIDs[id] {
+		return true
+	}
+	return (id >= 27 && id <= 36) || (id >= 50 && id <= 58)
+}
+
+// Excel serial numbers are bounded by the calendar it can represent. The range
+// matches OLE Automation dates: the lower bound is year 100 and the upper bound
+// is the end of 9999.
+const (
+	minSerial = -657435.0
+	maxSerial = 2958466.0
+)
+
+// SerialInRange reports whether a serial denotes a date Excel could represent.
+//
+// A cell can carry a date format and a value that is not a date -- a stray
+// 1.0E12, or a number that acquired a neighbour's formatting. Converting those
+// anyway yields confident nonsense: 1.0E12 becomes the year 2,737,908,906.
+// Callers should fall back to returning the number.
+func SerialInRange(serial float64) bool {
+	if math.IsNaN(serial) || math.IsInf(serial, 0) {
+		return false
+	}
+	return serial >= minSerial && serial <= maxSerial
+}
 
 // IsDateFormat reports whether a format code renders its value as a date or time.
 //

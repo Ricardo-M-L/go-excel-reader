@@ -28,7 +28,10 @@ cd "$CORPUS"
 : > "$WORK/results.tsv"
 for f in $(find . -maxdepth 2 \( -iname '*.xls' -o -iname '*.xlsx' \) | sort); do
   name="${f#./}"
-  timeout 60 dotnet "$EDR" "$f" > "$WORK/e.txt" 2>/dev/null && erc=0 || erc=$?
+  # TZ=UTC is load-bearing. ExcelDataReader converts OOXML strict ISO dates
+  # through the machine's local timezone, so the same file decodes differently
+  # on different hosts. Pinning it compares values rather than locales.
+  TZ=UTC timeout 60 dotnet "$EDR" "$f" > "$WORK/e.txt" 2>/dev/null && erc=0 || erc=$?
   timeout 60 go run "$ROOT/journey/godump" "$f" > "$WORK/g.txt" 2>/dev/null && grc=0 || grc=$?
 
   if   [ $erc -ne 0 ] && [ $grc -ne 0 ]; then v=BOTH_REJECT

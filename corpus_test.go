@@ -83,8 +83,8 @@ func TestCorpusBaselineShape(t *testing.T) {
 	}
 
 	want := map[string]int{
-		"IDENTICAL":      214, // byte-identical to ExcelDataReader
-		"DIFFER":         29,  // both read it, output disagrees
+		"IDENTICAL":      229, // byte-identical to ExcelDataReader
+		"DIFFER":         14,  // both read it, output disagrees
 		"BOTH_REJECT":    33,  // both refuse: xlsb, encrypted, corrupt
 		"ONLY_EDR_READS": 27,  // our gaps: BIFF5 and earlier, and open bugs
 	}

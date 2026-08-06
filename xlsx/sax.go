@@ -35,6 +35,14 @@ func newDecoder(r io.Reader) *xml.Decoder {
 // digit, so A..Z are 1..26 and AA is 26+1. Treating 'A' as 0 makes every
 // two-letter column off by 26, which is the classic way a reader lands every
 // value past column Z in the wrong place.
+// maxColumns is the widest sheet the format allows: columns A through XFD.
+//
+// The bound is load-bearing, not decorative. A cell reference is arbitrary text
+// from the file, and the row buffer is grown to reach the column it names, so
+// an eleven-letter reference would ask for billions of cells. Rejecting
+// anything the format cannot express keeps that allocation tied to reality.
+const maxColumns = 16384
+
 func columnIndex(ref string) (int, bool) {
 	col := 0
 	i := 0
@@ -47,6 +55,9 @@ func columnIndex(ref string) (int, bool) {
 			break
 		}
 		col = col*26 + int(c-'A') + 1
+		if col > maxColumns {
+			return 0, false
+		}
 	}
 	if i == 0 {
 		return 0, false
@@ -344,7 +355,7 @@ func (r *Reader) makeCell(raw, typ string, styleIdx int) cells.Cell {
 		if err != nil {
 			return cells.Cell{Value: raw, Raw: raw}
 		}
-		if styleIdx >= 0 && r.styles.IsDate(styleIdx) {
+		if styleIdx >= 0 && r.styles.IsDate(styleIdx) && numfmt.SerialInRange(f) {
 			return cells.Cell{Value: numfmt.SerialToTime(f, r.date1904), Raw: raw}
 		}
 		// Prefer int64 when the file wrote a whole number. Excel stores every

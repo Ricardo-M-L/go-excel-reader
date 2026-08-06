@@ -163,6 +163,19 @@ func (c *cfb) readSector(sector uint32) ([]byte, error) {
 // into DIFAT sectors, each of which ends with a pointer to the next, which is
 // why this is a chain walk rather than a single read.
 func (c *cfb) readDIFAT(header []byte, firstDIFAT, numDIFAT, numFATSectors uint32) ([]uint32, error) {
+	// numFATSectors is read straight out of the header and is entirely under
+	// the control of whoever produced the file. Using it as a capacity hint
+	// lets a two-kilobyte file request a seventeen-gigabyte allocation and kill
+	// the process -- no panic to recover, just a fatal out-of-memory.
+	//
+	// A file cannot contain more FAT sectors than it contains sectors, so the
+	// real bound is its own length.
+	maxSectors := c.size/int64(c.sectorSize) + 1
+	if int64(numFATSectors) > maxSectors {
+		return nil, fmt.Errorf("xls: header claims %d FAT sectors but the file holds at most %d",
+			numFATSectors, maxSectors)
+	}
+
 	sectors := make([]uint32, 0, numFATSectors)
 
 	for i := 0; i < 109 && uint32(len(sectors)) < numFATSectors; i++ {

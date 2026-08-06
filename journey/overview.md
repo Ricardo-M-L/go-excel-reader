@@ -18,7 +18,7 @@ it and the original C# library both dump a file to a canonical form, and the dum
 compared byte for byte — not on files I wrote, but on **ExcelDataReader's own 303-file
 test corpus**, collected over a decade because each file broke something.
 
-214 match exactly. 27 it refuses on purpose. 29 disagree and are written down. None are
+229 match exactly. 27 it refuses on purpose. 14 disagree and are written down. None are
 read here that the original refuses.
 
 That last sentence is the one worth having. The rest of this is how those numbers moved.
@@ -89,9 +89,9 @@ So I pointed the same harness at all 303 of the `.xls` and `.xlsx` files:
 
 | Result | Before fixes | After |
 |---|---|---|
-| Byte-identical to ExcelDataReader | 207 | **214** |
+| Byte-identical to ExcelDataReader | 207 | **229** |
 | Both readers refuse (xlsb, encrypted, corrupt) | 33 | 33 |
-| Both read it, output differs | 37 | **29** |
+| Both read it, output differs | 37 | **14** |
 | Only ExcelDataReader reads it | 26 | 27 |
 | **Only mine reads it** | **0** | **0** |
 
@@ -219,9 +219,12 @@ pointers instead of 400,000 of each — and the garbage collector never traces i
 
 ## Deliberately not claimed
 
-- **214 of 303 is not 303.** 29 files are read by both and disagree, and they are not yet
-  diagnosed individually. The count is pinned by a test so it cannot quietly drop, but
-  "88% agreement" is the honest headline, not "matches the original".
+- **229 of 303 is not 303.** 14 files are read by both and disagree. Ten are diagnosed
+  (elapsed-time cells, strict ISO timezones, whitespace) and four are open. The count is
+  pinned by a test, but "94% agreement" is the honest headline, not "matches the original".
+- **The comparison pins the reference to `TZ=UTC`.** ExcelDataReader's output for OOXML
+  strict dates depends on the host's timezone; ours does not. Without that pin, the
+  agreement figure would depend on where it was measured.
 - The 27 files ExcelDataReader reads and this does not are mostly BIFF5-and-earlier and
   encrypted workbooks, both refused on purpose. A handful are not, and are open.
 - The "streams a 500 MB workbook" claim is a design property, not a measurement. The
@@ -230,6 +233,32 @@ pointers instead of 400,000 of each — and the garbage collector never traces i
 - BIFF5 and earlier `.xls` are refused with a clear error rather than decoded. That is a
   scope decision, not a capability.
 - One machine, one architecture, one Go version.
+
+## And then inputs nobody wrote
+
+The corpus is 303 files that exist because a human hit a bug. Fuzzing is the same idea
+with the human removed, and it found a different *kind* of bug within twenty-five
+seconds:
+
+```
+runtime: out of memory: cannot allocate 17179869184-byte block
+	xls.(*cfb).readDIFAT  cfb.go:166
+```
+
+A compound file header declares how many sectors its allocation table occupies. I used
+that number as an allocation size. A two-kilobyte file claiming `0xFFFFFFFF` sectors
+asks for seventeen gigabytes and kills the process — and a Go fatal out-of-memory is not
+recoverable, so no caller can defend against it.
+
+The two techniques found completely different things and neither would have found the
+other's. The corpus found **semantic** errors: a locale date format id I had never heard
+of, a serial out of range, records in an order I did not know was legal. Every one needed
+a real file produced by real software. The fuzzer found a **safety** error: a number used
+without asking whether it could be true. No human would ever write a file claiming four
+billion FAT sectors, so it will never appear in any corpus — and it is the one that gets
+your service killed.
+
+2.1 million executions after the fix, no further failures.
 
 ## Read the actual work
 
