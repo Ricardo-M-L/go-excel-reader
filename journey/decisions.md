@@ -245,3 +245,91 @@ a README for a few hours.
 
 **Traded:** A version number, and a permanent record that the first one shipped with a
 claim I couldn't defend. That record is the point.
+
+---
+
+## D14 — Run against ExcelDataReader's own test corpus
+**2026-08-06**
+
+**Ambiguity:** The library was tagged and green, verified byte-for-byte against the
+reference implementation on twelve fixtures. That looked like enough.
+
+**Chose:** Point the same harness at all 303 `.xls` and `.xlsx` files in
+ExcelDataReader's `src/TestData`.
+
+**Why:** Twelve fixtures I wrote can only contain cases I thought of. Upstream's
+corpus is a decade of regression files, each added because it broke a reader.
+It is the cheapest source of adversarial input that exists for this problem, and
+it was already on disk after cloning the repo to read the source.
+
+**Result:** 207 identical, 37 differing, 26 gaps, and **zero** files read here that
+the reference refuses. Three distinct defects found; after fixes, 214 identical
+and 29 differing. Cost about twenty minutes to set up.
+
+**Traded:** The comfortable belief that "verified against the original" meant
+something broader than it did.
+
+---
+
+## D15 — Narrow the empty-string rule instead of keeping the first fix
+**2026-08-06**
+
+**Ambiguity:** ExcelDataReader reports an empty inline string as absent. The obvious
+fix — treat empty text as an empty cell — repaired four corpus files and broke eight.
+
+**Chose:** Apply the rule only to inline strings. Empty entries in the shared string
+table, and empty `LABEL` records in `.xls`, stay as the empty string.
+
+**Why:** The reference distinguishes a cell that was written and holds nothing from a
+value the file deliberately interned. Whether that distinction is intentional upstream
+or an artefact of two code paths, it is the behaviour, and parity means matching the
+behaviour rather than the behaviour I would have designed.
+
+**Result:** Four files fixed, none broken.
+
+**Traded:** A rule that is harder to state. The comment in `sax.go` explains the
+asymmetry rather than hiding it, because a future reader will otherwise "simplify" it
+straight back into the broken version.
+
+---
+
+## D16 — Make the error-cell behaviour an option, defaulting to the reference
+**2026-08-06**
+
+**Ambiguity:** A cell holding `#DIV/0!` reads as absent in ExcelDataReader. This
+library returned the display text, which is arguably more useful.
+
+**Chose:** Default to the reference behaviour; `WithErrorValues(true)` restores the
+text. `Cell.Raw` carries it in both modes.
+
+**Why:** The behaviour was defensible; the README was not. It claimed output identical
+to the original while deliberately differing. Given a choice between weakening the
+claim and matching the reference, matching costs one option and keeps the strong claim
+true.
+
+**Traded:** A slightly larger API, and a default that is less useful than the
+alternative for anyone who does not read the docs.
+
+---
+
+## D17 — Pin the corpus result with hashes of our own output
+**2026-08-06**
+
+**Ambiguity:** The corpus comparison needs .NET and a 379-file checkout, neither of
+which belongs in this repository or in CI. But an unpinned number in a README rots.
+
+**Chose:** Commit `testdata/corpus_baseline.tsv` — verdict plus a SHA-256 of *our*
+dump for each file. `TestCorpusBaselineShape` asserts the counts with no corpus
+present; `TestCorpusParity` re-derives every dump when `EXCEL_CORPUS` is set.
+
+**Why:** Hashing our own output is what removes the .NET dependency from the check.
+The hashes came from a run where the comparison really happened, so pinning them pins
+the parity result by proxy. Refreshing hashes deliberately does not re-derive the
+verdicts, which still require the full harness — so a change in what we agree on has
+to be measured, not assumed.
+
+**Result:** The first generator was a shell script that hashed empty output for
+rejected files while the Go test wrote `REJECTED`, reporting seventeen false changes.
+Regeneration now runs through the same function the check uses. The generator and the
+checker being two implementations of one idea is the same mistake this project keeps
+making.

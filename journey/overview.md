@@ -14,9 +14,14 @@ loading a workbook into memory.
 Pure Go, no CGo, one dependency. It reads all three formats through the same cursor model.
 
 The finished thing works, and it is verified in a way I think is worth more than the code:
-it and the original C# library both dump every test file to a canonical form, and the
-dumps are compared byte for byte. They match exactly — including a workbook of 1,000,000
-cells and an 8.9 MB `.xls` whose string table spans hundreds of records.
+it and the original C# library both dump a file to a canonical form, and the dumps are
+compared byte for byte — not on files I wrote, but on **ExcelDataReader's own 303-file
+test corpus**, collected over a decade because each file broke something.
+
+214 match exactly. 27 it refuses on purpose. 29 disagree and are written down. None are
+read here that the original refuses.
+
+That last sentence is the one worth having. The rest of this is how those numbers moved.
 
 I am not a spreadsheet-format expert. I had not written a line of BIFF or CFB parsing
 before this.
@@ -70,10 +75,69 @@ Both are now tests. The baseline one matters more: if row streaming ever regress
 accumulation, the string-heavy fixture would still look plausible while the repeating one
 blew past its budget.
 
+## Then I stopped grading my own work
+
+At this point everything passed and I had checked my twelve fixtures against the
+original C# library, byte for byte. That felt like strong evidence. It was
+evidence about twelve files I chose.
+
+ExcelDataReader ships **379 test files** of its own — real spreadsheets its
+maintainers collected over a decade because each one broke something. Names like
+`DateFormatButNotDate.xls`, `ClipboardBiff8.xls`, `Issue467_EmptyContinueLeftoverbytes.xls`.
+
+So I pointed the same harness at all 303 of the `.xls` and `.xlsx` files:
+
+| Result | Before fixes | After |
+|---|---|---|
+| Byte-identical to ExcelDataReader | 207 | **214** |
+| Both readers refuse (xlsb, encrypted, corrupt) | 33 | 33 |
+| Both read it, output differs | 37 | **29** |
+| Only ExcelDataReader reads it | 26 | 27 |
+| **Only mine reads it** | **0** | **0** |
+
+That last row is the one I care about most. Nothing here parses a file the
+reference implementation refuses, which would mean inventing data.
+
+It found three defects, each a different kind:
+
+**A silent one.** `Issue411.xls` returned zero rows, no error, exit code 0. A
+caller gets an empty spreadsheet and no indication anything went wrong.
+
+The cause is the best thing in this project. A compound file is a *tree* of
+storages, and a `.xls` containing an embedded object has nested storages with
+streams of their own. I was finding streams by scanning all directory entries
+linearly, so I resolved a `Workbook` belonging to the embedded object rather
+than the real one.
+
+I had deleted the sibling and child pointers as dead fields, and written a
+comment explaining why that was fine:
+
+> *"walking the tree would be asymptotically better on a directory far larger
+> than any spreadsheet has"*
+
+Confidently wrong. Those pointers aren't a performance detail — they are what
+gives an entry its **scope**. I removed them, rationalised it in a comment, and
+the rationalisation read as informed. Fixed, that file now says plainly that it
+is BIFF5 and unsupported. Silent data loss became an honest error.
+
+**A subtle one.** ExcelDataReader distinguishes an empty *inline* string from an
+empty entry in the *shared* string table — the first is an absent value, the
+second is a value that happens to be empty. I treated both as text.
+
+My first fix applied the rule everywhere. It repaired four files and broke
+eight. The corpus caught that immediately, which is the entire point: a
+one-line change that looks obviously right, measured against 303 files, is a
+question with an answer instead of an opinion.
+
+**A deliberate one.** Error cells. EDR reports `#DIV/0!` as having no value; I
+returned the text. Mine is arguably more useful, but "arguably more useful" is
+not "identical," and my README said identical. It is now an option, off by
+default, and there is a table of known intentional differences.
+
 ## The failure mode, again
 
-Two of my checks reported success while measuring nothing. They have the same shape as the
-four that did it yesterday:
+Three times now, something reported success while measuring less than I thought.
+Same shape as the four that did it yesterday:
 
 **A passing test proves the assertion held. It does not prove the code ran.**
 
@@ -81,6 +145,10 @@ Yesterday's version was a check that could not distinguish "the thing is fine" f
 failed to look." This one could not distinguish "the code works" from "the code was never
 called." A test whose fixture doesn't reach the code under test passes for free, and it
 passes *faster*, and the speed reads as efficiency.
+
+The third instance was the twelve fixtures themselves. They agreed with the reference
+implementation perfectly — and they were twelve files I chose, which is a sample that
+cannot surprise me. The corpus could, and did, eight times.
 
 What helps is the same thing that helped yesterday: compare against something that can
 actually differ. So the fixtures are now written by three independent tools, two of which
@@ -106,6 +174,7 @@ The honest scorecard, because a post that only lists wins isn't worth reading:
 |---|---|
 | Wrote it and it worked first run | `numfmt`, the xlsx reader, the CSV reader, the BIFF8 reader |
 | Cost real time | Fixtures that tested nothing; a memory claim I couldn't defend |
+| Found only by someone else's tests | A silent zero-row read; an empty-string rule; a parity claim that was narrower than it sounded |
 | Deliberately not ported | xlsb, encryption, BIFF5 and earlier, `AsDataSet()` |
 | Deliberately not optimised | `unsafe.String` on the string blob — meets budget without it |
 
@@ -150,10 +219,11 @@ pointers instead of 400,000 of each — and the garbage collector never traces i
 
 ## Deliberately not claimed
 
-- **No file in this project was written by Microsoft Excel.** Every fixture comes from
-  openpyxl, xlsxwriter or xlwt. The byte-for-byte parity with ExcelDataReader is real and
-  is much stronger evidence than my own tests, but it is not the same as being tested
-  against files Excel produced.
+- **214 of 303 is not 303.** 29 files are read by both and disagree, and they are not yet
+  diagnosed individually. The count is pinned by a test so it cannot quietly drop, but
+  "88% agreement" is the honest headline, not "matches the original".
+- The 27 files ExcelDataReader reads and this does not are mostly BIFF5-and-earlier and
+  encrypted workbooks, both refused on purpose. A handful are not, and are open.
 - The "streams a 500 MB workbook" claim is a design property, not a measurement. The
   largest file tested is 9.2 MB.
 - `golangci-lint` was not run; it wasn't installed. `go vet` and `staticcheck` are clean.
