@@ -37,6 +37,9 @@ type Reader struct {
 
 	sheetOpen bool
 
+	// errorValues makes formula errors readable as their display text.
+	errorValues bool
+
 	// fetched holds a completed row that Read has not yet handed out, which
 	// happens while blank rows are being emitted to close an index gap.
 	fetched     []cells.Cell
@@ -88,6 +91,10 @@ func Open(ra io.ReaderAt, size int64) (*Reader, error) {
 
 // SetCloser registers a resource to release when the reader is closed.
 func (r *Reader) SetCloser(cl io.Closer) { r.closer = cl }
+
+// SetErrorValues controls whether formula error cells expose their display
+// text as the cell value. It must be called before reading begins.
+func (r *Reader) SetErrorValues(on bool) { r.errorValues = on }
 
 // readGlobals consumes the workbook globals substream.
 func (r *Reader) readGlobals() error {
@@ -418,8 +425,11 @@ func (r *Reader) decodeCellRecord() (row uint16, placed []cells.Cell, ok bool) {
 		if !ok1 || !ok2 {
 			return 0, nil, false
 		}
-		v := boolErrValue(val, isErr != 0)
-		return h.row, placeAt(int(h.col), cells.Cell{Value: v, Raw: fmt.Sprint(v)}), true
+		if isErr != 0 {
+			return h.row, placeAt(int(h.col), r.errorCell(errorText(val))), true
+		}
+		b := val != 0
+		return h.row, placeAt(int(h.col), cells.Cell{Value: b, Raw: strconv.FormatBool(b)}), true
 
 	case recFormula:
 		return r.decodeFormula()
@@ -455,11 +465,23 @@ func (r *Reader) decodeFormula() (uint16, []cells.Cell, bool) {
 	switch v := value.(type) {
 	case float64:
 		return h.row, placeAt(int(h.col), r.numericCell(h.xf, v)), true
-	case bool, string:
-		return h.row, placeAt(int(h.col), cells.Cell{Value: v, Raw: fmt.Sprint(v)}), true
+	case errValue:
+		return h.row, placeAt(int(h.col), r.errorCell(string(v))), true
+	case bool:
+		return h.row, placeAt(int(h.col), cells.Cell{Value: v, Raw: strconv.FormatBool(v)}), true
+	case string:
+		return h.row, placeAt(int(h.col), cells.Cell{Value: v, Raw: v}), true
 	default:
 		return h.row, placeAt(int(h.col), cells.Cell{}), true
 	}
+}
+
+// errorCell builds a cell for a formula error such as #DIV/0!.
+func (r *Reader) errorCell(text string) cells.Cell {
+	if r.errorValues {
+		return cells.Cell{Value: text, Raw: text}
+	}
+	return cells.Cell{Raw: text}
 }
 
 // readFollowingString consumes the STRING record that carries a formula's

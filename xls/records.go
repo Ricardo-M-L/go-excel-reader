@@ -313,13 +313,10 @@ func decodeRK(rk uint32) float64 {
 	return v
 }
 
-// boolErrValue interprets a BOOLERR payload.
-func boolErrValue(value byte, isError bool) any {
-	if !isError {
-		return value != 0
-	}
-	return errorText(value)
-}
+// errValue distinguishes a formula error from an ordinary string result, so
+// that the reader can decide how to present it rather than having to guess
+// whether a value that looks like "#REF!" was text a user typed.
+type errValue string
 
 // errorText maps a BIFF error code to the text Excel displays.
 func errorText(code byte) string {
@@ -364,7 +361,7 @@ func formulaResult(b []byte) (value any, needsString bool) {
 	case 0x01:
 		return b[2] != 0, false
 	case 0x02:
-		return errorText(b[2]), false
+		return errValue(errorText(b[2])), false
 	case 0x03: // empty string
 		return "", false
 	default:

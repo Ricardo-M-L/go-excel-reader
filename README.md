@@ -5,8 +5,7 @@ one dependency (`golang.org/x/text`, used only for CSV character encodings).
 
 It is a port of the core of [ExcelDataReader](https://github.com/ExcelDataReader/ExcelDataReader)
 (C#, MIT) and keeps that library's cursor model: advance a sheet, advance a row,
-read cells by column index. Nothing larger than the current row is held in
-memory.
+read cells by column index. Rows stream, so row count does not affect memory.
 
 ```bash
 go get github.com/jloor/go-excel-reader
@@ -60,10 +59,10 @@ the least reliable thing about a spreadsheet.
 ## API
 
 ```go
-func OpenFile(path string) (Reader, error)
-func OpenReader(r io.ReadSeeker) (Reader, error)
-func OpenXLSX(r io.ReadSeeker) (Reader, error)
-func OpenXLS(r io.ReadSeeker) (Reader, error)
+func OpenFile(path string, opts ...Option) (Reader, error)
+func OpenReader(r io.ReadSeeker, opts ...Option) (Reader, error)
+func OpenXLSX(r io.ReadSeeker, opts ...Option) (Reader, error)
+func OpenXLS(r io.ReadSeeker, opts ...Option) (Reader, error)
 func OpenCSV(r io.Reader, opts ...CSVOption) (Reader, error)
 func ReadAll(r Reader) ([][]Row, error)
 func Detect(rs io.ReadSeeker) (Format, error)
@@ -84,7 +83,8 @@ func Detect(rs io.ReadSeeker) (Format, error)
 | `Err() error` | first error encountered while streaming |
 | `Close() error` | release resources |
 
-CSV options: `WithCSVDelimiter(rune)`, `WithCSVEncoding(encoding.Encoding)`,
+Options: `WithErrorValues(bool)` on any format. For delimited text:
+`WithCSVDelimiter(rune)`, `WithCSVEncoding(encoding.Encoding)`,
 `WithCSVTypeInference(bool)`.
 
 ### Type mapping
@@ -96,7 +96,7 @@ CSV options: `WithCSVDelimiter(rune)`, `WithCSVEncoding(encoding.Encoding)`,
 | number with a fractional part | `float64` |
 | date- or time-formatted number | `time.Time` (always UTC) |
 | boolean | `bool` |
-| formula error (`#DIV/0!`) | `string` |
+| formula error (`#DIV/0!`) | `nil`; `WithErrorValues(true)` makes it a `string` |
 | empty | `nil` |
 
 Typed getters are strict: `GetString` on a number reports `false` rather than
@@ -155,24 +155,58 @@ paying three times over for it.
 ## Correctness
 
 The reader is checked against the original C# implementation rather than only
-against its own expectations. Both libraries dump each fixture to a canonical
-form — numbers as raw IEEE 754 bit patterns, so that C# and Go string formatting
-cannot introduce false differences — and the dumps are compared byte for byte.
+against its own expectations. Both libraries dump a file to a canonical form —
+numbers as raw IEEE 754 bit patterns, so that C# and Go string formatting cannot
+introduce false differences — and the dumps are compared byte for byte.
 
-All fixtures match exactly, including the 1,000,000-cell workbook and an
-8.9 MB `.xls` whose shared string table spans hundreds of `CONTINUE` records.
+That comparison runs over **ExcelDataReader's own 303-file test corpus**: real
+spreadsheets its maintainers collected because each one broke something.
 
-Test fixtures are produced by three independent writers (openpyxl, xlsxwriter
-and xlwt) so that the tests exercise the format rather than agreeing with a
-writer of our own. openpyxl and xlsxwriter store strings differently — inline
-versus shared — and a test asserts that both representations remain covered.
+| Result | Files |
+|---|---|
+| Byte-identical to ExcelDataReader | **214** |
+| Both readers refuse (xlsb, encrypted, corrupt) | 33 |
+| Both read it, output differs | 29 |
+| Only ExcelDataReader reads it | 27 |
+| Only this library reads it | **0** |
+
+88% of the files both readers accept decode identically. The last row is the one
+that would worry me: nothing here parses a file the reference implementation
+rejects, which would mean inventing data.
+
+The 27 gaps are mostly BIFF5-and-earlier `.xls` and encrypted workbooks, both
+refused deliberately. The 29 differences are tracked in
+`testdata/corpus_baseline.tsv`, and a test pins the counts so that trading
+agreement for something else has to be a deliberate act.
+
+Running it needs a corpus checkout; the committed baseline hashes let the
+regression check run without .NET:
+
+```bash
+git clone --depth 1 https://github.com/ExcelDataReader/ExcelDataReader /tmp/edr
+EXCEL_CORPUS=/tmp/edr/src/TestData go test -run TestCorpus ./...
+```
+
+The project's own fixtures are produced by three independent writers (openpyxl,
+xlsxwriter and xlwt) so that the tests exercise the format rather than agreeing
+with a writer of our own. openpyxl and xlsxwriter store strings differently —
+inline versus shared — and a test asserts that both representations stay covered.
+
+### Known intentional differences
+
+| Case | ExcelDataReader | Here |
+|---|---|---|
+| Formula error cell (`#DIV/0!`) | no value | no value; `WithErrorValues(true)` returns the text |
+| Raw cell text | not exposed | always available via `Cell(col).Raw` |
+| Mid-stream failure | throws | reported by `Err()` |
 
 ## Not supported in v0.1.0
 
 - `.xlsb` (OpenXML Binary) — detected and rejected with a clear error
 - Password-protected or encrypted workbooks
 - BIFF5 and earlier `.xls` — rejected with a clear error rather than decoded
-  into mojibake
+  into mojibake. This accounts for most of the 27 corpus files ExcelDataReader
+  reads and this library does not.
 - Fraction number formats (`# ?/?`) in `numfmt.FormatValue`
 - Cell styling, merged cells, formulas as source text (cached results are read)
 

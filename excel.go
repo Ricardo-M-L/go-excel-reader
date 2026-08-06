@@ -168,18 +168,44 @@ func (r *reader) IsEmpty(col int) bool {
 	return !ok || c.IsEmpty()
 }
 
+// Option configures a spreadsheet reader. Options that apply only to delimited
+// text are CSVOption values instead.
+type Option func(*options)
+
+type options struct {
+	errorValues bool
+}
+
+// WithErrorValues makes formula error cells such as #DIV/0! readable through
+// GetValue and GetString as their display text.
+//
+// The default is off, matching ExcelDataReader, which reports an error cell as
+// having no value. Either way the text is preserved in Cell.Raw, so this option
+// only changes whether an error is a value or an absence.
+func WithErrorValues(on bool) Option {
+	return func(o *options) { o.errorValues = on }
+}
+
+func buildOptions(opts []Option) options {
+	var o options
+	for _, f := range opts {
+		f(&o)
+	}
+	return o
+}
+
 // OpenFile opens a spreadsheet by path, detecting its format from content.
 //
 // The returned Reader holds the file open until Close. Because an *os.File
 // supports random access, xlsx and xls read straight from disk without the
 // whole file ever being buffered.
-func OpenFile(path string) (Reader, error) {
+func OpenFile(path string, opts ...Option) (Reader, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 
-	r, err := openSeeker(f, f)
+	r, err := openSeeker(f, f, buildOptions(opts))
 	if err != nil {
 		f.Close()
 		return nil, fmt.Errorf("%s: %w", path, err)
@@ -193,11 +219,11 @@ func OpenFile(path string) (Reader, error) {
 // If r does not also implement io.ReaderAt, the xlsx and xls paths buffer the
 // stream in memory, because both formats require random access. Pass an
 // *os.File, a *bytes.Reader or your own ReaderAt to stream instead.
-func OpenReader(r io.ReadSeeker) (Reader, error) {
-	return openSeeker(r, nil)
+func OpenReader(r io.ReadSeeker, opts ...Option) (Reader, error) {
+	return openSeeker(r, nil, buildOptions(opts))
 }
 
-func openSeeker(rs io.ReadSeeker, closer io.Closer) (Reader, error) {
+func openSeeker(rs io.ReadSeeker, closer io.Closer, o options) (Reader, error) {
 	format, err := Detect(rs)
 	if err != nil {
 		return nil, err
@@ -208,9 +234,9 @@ func openSeeker(rs io.ReadSeeker, closer io.Closer) (Reader, error) {
 
 	switch format {
 	case FormatXLSX:
-		return openXLSX(rs, closer)
+		return openXLSX(rs, closer, o)
 	case FormatXLS:
-		return openXLS(rs, closer)
+		return openXLS(rs, closer, o)
 	case FormatCSV:
 		return openCSV(rs, closer, nil)
 	default:
@@ -219,17 +245,21 @@ func openSeeker(rs io.ReadSeeker, closer io.Closer) (Reader, error) {
 }
 
 // OpenXLSX opens an OpenXML spreadsheet without format detection.
-func OpenXLSX(r io.ReadSeeker) (Reader, error) { return openXLSX(r, nil) }
+func OpenXLSX(r io.ReadSeeker, opts ...Option) (Reader, error) {
+	return openXLSX(r, nil, buildOptions(opts))
+}
 
 // OpenXLS opens a BIFF8 spreadsheet without format detection.
-func OpenXLS(r io.ReadSeeker) (Reader, error) { return openXLS(r, nil) }
+func OpenXLS(r io.ReadSeeker, opts ...Option) (Reader, error) {
+	return openXLS(r, nil, buildOptions(opts))
+}
 
 // OpenCSV opens a delimited text file.
 func OpenCSV(r io.Reader, opts ...CSVOption) (Reader, error) {
 	return openCSV(r, nil, opts)
 }
 
-func openXLSX(rs io.ReadSeeker, closer io.Closer) (Reader, error) {
+func openXLSX(rs io.ReadSeeker, closer io.Closer, o options) (Reader, error) {
 	ra, size, err := randomAccess(rs)
 	if err != nil {
 		return nil, err
@@ -238,13 +268,14 @@ func openXLSX(rs io.ReadSeeker, closer io.Closer) (Reader, error) {
 	if err != nil {
 		return nil, err
 	}
+	x.SetErrorValues(o.errorValues)
 	if closer != nil {
 		x.SetCloser(closer)
 	}
 	return &reader{src: x}, nil
 }
 
-func openXLS(rs io.ReadSeeker, closer io.Closer) (Reader, error) {
+func openXLS(rs io.ReadSeeker, closer io.Closer, o options) (Reader, error) {
 	ra, size, err := randomAccess(rs)
 	if err != nil {
 		return nil, err
@@ -253,6 +284,7 @@ func openXLS(rs io.ReadSeeker, closer io.Closer) (Reader, error) {
 	if err != nil {
 		return nil, err
 	}
+	x.SetErrorValues(o.errorValues)
 	if closer != nil {
 		x.SetCloser(closer)
 	}

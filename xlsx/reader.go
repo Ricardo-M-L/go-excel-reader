@@ -43,6 +43,9 @@ type Reader struct {
 	sst       *SharedStrings
 	sstLoaded bool
 
+	// errorValues makes formula errors readable as their display text.
+	errorValues bool
+
 	scan *sheetScanner
 	// pending marks a row that the scanner has produced but that Read has not
 	// yet delivered, because blank rows are being emitted ahead of it.
@@ -106,6 +109,10 @@ func Open(ra io.ReaderAt, size int64) (*Reader, error) {
 // the caller hand over an open file without the reader having to know how the
 // bytes were obtained.
 func (r *Reader) SetCloser(c io.Closer) { r.closer = c }
+
+// SetErrorValues controls whether formula error cells expose their display
+// text as the cell value. It must be called before reading begins.
+func (r *Reader) SetErrorValues(on bool) { r.errorValues = on }
 
 // normalizePart canonicalises a zip entry name for lookup. OPC part names are
 // case-sensitive in principle, but producers disagree in practice, so lookups

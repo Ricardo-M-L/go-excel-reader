@@ -50,6 +50,7 @@ type cfb struct {
 	fat     []uint32
 	miniFAT []uint32
 	entries []dirEntry
+	rootIdx int
 
 	// miniStream is the root entry's stream, inside which mini sectors live.
 	miniStream *stream
@@ -57,16 +58,24 @@ type cfb struct {
 
 // dirEntry is one directory record.
 //
-// The directory is stored as a red-black tree, but the entries also sit
-// contiguously in their sectors, so finding a stream by name is a linear scan
-// over all of them. That is why the sibling and child pointers are not kept:
-// walking the tree would be asymptotically better on a directory far larger
-// than any spreadsheet has.
+// The sibling and child pointers are not a performance detail, they are what
+// gives an entry its scope. A compound file is a tree of storages, and a .xls
+// containing an embedded OLE object -- a chart, or another document -- holds a
+// nested storage with streams of its own, which may share names with the ones
+// at the root.
+//
+// Enumerating entries by scanning sectors linearly loses that structure and can
+// return a "Workbook" stream belonging to an embedded object instead of the
+// workbook itself. That is not hypothetical: it silently returned zero rows for
+// a real file until the traversal below was written.
 type dirEntry struct {
-	name    string
-	objType byte
-	start   uint32
-	size    int64
+	name     string
+	objType  byte
+	start    uint32
+	size     int64
+	child    uint32
+	leftSib  uint32
+	rightSib uint32
 }
 
 const (
@@ -240,8 +249,11 @@ func (c *cfb) readDirectory(first uint32, major uint16) error {
 			e := buf[off : off+dirEntrySize]
 			nameLen := int(binary.LittleEndian.Uint16(e[64:66]))
 			entry := dirEntry{
-				objType: e[66],
-				start:   binary.LittleEndian.Uint32(e[116:120]),
+				objType:  e[66],
+				leftSib:  binary.LittleEndian.Uint32(e[68:72]),
+				rightSib: binary.LittleEndian.Uint32(e[72:76]),
+				child:    binary.LittleEndian.Uint32(e[76:80]),
+				start:    binary.LittleEndian.Uint32(e[116:120]),
 			}
 
 			size := binary.LittleEndian.Uint64(e[120:128])
@@ -262,16 +274,19 @@ func (c *cfb) readDirectory(first uint32, major uint16) error {
 		return errors.New("xls: compound file has an empty directory")
 	}
 
-	// The root entry doubles as the container for every mini sector.
-	root := c.entries[0]
-	if root.objType != objTypeRootDir {
-		for _, e := range c.entries {
-			if e.objType == objTypeRootDir {
-				root = e
-				break
-			}
+	// The root entry doubles as the container for every mini sector, and its
+	// child pointer is the entry point for the root storage's contents.
+	c.rootIdx = -1
+	for i, e := range c.entries {
+		if e.objType == objTypeRootDir {
+			c.rootIdx = i
+			break
 		}
 	}
+	if c.rootIdx < 0 {
+		return errors.New("xls: compound file has no root directory entry")
+	}
+	root := c.entries[c.rootIdx]
 	if root.size > 0 && root.start <= maxRegSect {
 		chain, err := c.chainOf(root.start, root.size)
 		if err != nil {
@@ -347,14 +362,60 @@ func (c *cfb) miniChainOf(start uint32, byteSize int64) ([]uint32, error) {
 	return chain, nil
 }
 
-// openStream returns a reader over the named stream.
+// rootLevelEntries returns the indices of the entries directly inside the root
+// storage, in the order the red-black tree yields them.
+//
+// Only the sibling links are followed. Descending through an entry's child
+// pointer would walk into a nested storage, which is exactly what this exists
+// to avoid.
+func (c *cfb) rootLevelEntries() []int {
+	if c.rootIdx < 0 || c.rootIdx >= len(c.entries) {
+		return nil
+	}
+
+	var (
+		out  []int
+		seen = make(map[uint32]bool, len(c.entries))
+		walk func(id uint32)
+	)
+	walk = func(id uint32) {
+		// A malformed file can describe a cycle; seen bounds the traversal.
+		if id > maxRegSect || int(id) >= len(c.entries) || seen[id] {
+			return
+		}
+		seen[id] = true
+		e := c.entries[id]
+		walk(e.leftSib)
+		out = append(out, int(id))
+		walk(e.rightSib)
+	}
+	walk(c.entries[c.rootIdx].child)
+	return out
+}
+
+// openStream returns a reader over the named stream, preferring the root
+// storage.
+//
+// Names are tried in the order given, so a caller asking for "Workbook" then
+// "Book" gets the modern stream when both are present. The whole-directory
+// scan is kept only as a fallback for files whose tree links are broken; a
+// well-formed file never reaches it.
 func (c *cfb) openStream(names ...string) (*stream, error) {
+	rootLevel := c.rootLevelEntries()
+
+	for _, want := range names {
+		for _, i := range rootLevel {
+			if e := c.entries[i]; e.objType == objTypeStream && e.name == want {
+				return c.streamFor(e)
+			}
+		}
+	}
+
 	for _, want := range names {
 		for _, e := range c.entries {
-			if e.objType != objTypeStream || e.name != want {
-				continue
+			if e.objType == objTypeStream && e.name == want {
+				return c.streamFor(e)
 			}
-			return c.streamFor(e)
 		}
 	}
 	return nil, ErrNoWorkbook

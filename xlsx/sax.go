@@ -301,16 +301,29 @@ func (r *Reader) makeCell(raw, typ string, styleIdx int) cells.Cell {
 			r.noteErr(fmt.Errorf("xlsx: shared string index %d out of range (table holds %d)", idx, sst.Len()))
 			return cells.Cell{Raw: raw}
 		}
+		// An empty entry in the shared table is a value: the file went to the
+		// trouble of interning it. Only inline text is treated as absent below.
 		return cells.Cell{Value: str, Raw: str}
 
-	case "inlineStr", "str":
-		// inlineStr is text stored in the cell; str is a formula's string result.
+	case "inlineStr":
+		// Text stored in the cell itself. An empty <t> here means the cell was
+		// written but holds nothing, so it reads as empty rather than as "".
+		//
+		// This asymmetry with the shared table is not ours; it is what
+		// ExcelDataReader does, and matching it is what the corpus comparison
+		// is for. A whole-sheet export can otherwise differ by hundreds of
+		// cells purely in how blanks are represented.
+		return textCell(raw)
+
+	case "str":
+		// A formula's cached string result, which may legitimately be empty.
 		return cells.Cell{Value: raw, Raw: raw}
 
 	case "e":
-		// An error value such as #DIV/0!. It has no Go equivalent, so it is
-		// surfaced as its display text rather than silently dropped.
-		return cells.Cell{Value: raw, Raw: raw}
+		// An error such as #DIV/0!. It has no Go equivalent, so by default the
+		// cell reads as empty and the text stays in Raw, which matches
+		// ExcelDataReader. WithErrorValues surfaces the text as the value.
+		return r.errorCell(raw)
 
 	case "b":
 		return cells.Cell{Value: raw == "1" || strings.EqualFold(raw, "true"), Raw: raw}
@@ -345,6 +358,28 @@ func (r *Reader) makeCell(raw, typ string, styleIdx int) cells.Cell {
 		}
 		return cells.Cell{Value: f, Raw: raw}
 	}
+}
+
+// textCell builds a cell holding text.
+//
+// A cell whose text is empty reads as empty rather than as the empty string.
+// A file may write a string cell with no content, and reporting that as a
+// present-but-empty value makes it indistinguishable from a deliberate "" while
+// making IsEmpty answer false for a cell the user sees as blank. The raw text is
+// preserved either way.
+func textCell(s string) cells.Cell {
+	if s == "" {
+		return cells.Cell{}
+	}
+	return cells.Cell{Value: s, Raw: s}
+}
+
+// errorCell builds a cell for a formula error such as #DIV/0!.
+func (r *Reader) errorCell(text string) cells.Cell {
+	if r.errorValues {
+		return cells.Cell{Value: text, Raw: text}
+	}
+	return cells.Cell{Raw: text}
 }
 
 // isIntegerLiteral reports whether the raw text denotes a whole number written

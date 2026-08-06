@@ -1,0 +1,167 @@
+I ported the core of a C# spreadsheet library to Go in a day. Every test passed. The
+memory benchmark reported 3.6 MB against a 50 MB budget.
+
+The component those tests existed to exercise had never once executed.
+
+## What this is
+
+[ExcelDataReader](https://github.com/ExcelDataReader/ExcelDataReader) is the C# library
+most .NET codebases reach for when they have to read a spreadsheet. It handles `.xlsx`,
+the legacy `.xls` binary format, and CSV, through a streaming cursor rather than by
+loading a workbook into memory.
+
+[go-excel-reader](https://github.com/jloor/go-excel-reader) is a port of its core to Go.
+Pure Go, no CGo, one dependency. It reads all three formats through the same cursor model.
+
+The finished thing works, and it is verified in a way I think is worth more than the code:
+it and the original C# library both dump every test file to a canonical form, and the
+dumps are compared byte for byte. They match exactly — including a workbook of 1,000,000
+cells and an 8.9 MB `.xls` whose string table spans hundreds of records.
+
+I am not a spreadsheet-format expert. I had not written a line of BIFF or CFB parsing
+before this.
+
+## The plan was good. The tests were the problem.
+
+Yesterday's project was about a plan that was confidently wrong about the codebase it
+described. This time the plan was detailed and largely right — it named the record types,
+the magic bytes, the four RK encodings, and a gotchas table that was accurate.
+
+So the failure moved somewhere else.
+
+The shared string table is the reason an xlsx reader is hard to write efficiently. Almost
+every string in a spreadsheet lives in one shared table and each cell stores an index into
+it. It is the largest allocation a reader makes, and the whole memory design of this port
+is built around it.
+
+I wrote it, benchmarked it, and got 3.6 MB on a 4.6 MB file. Comfortably inside budget.
+
+The fixtures had no shared string table in them. openpyxl, which generated them, writes
+strings *inline* — `<c t="inlineStr">` — rather than into `xl/sharedStrings.xml`. There
+was no such file in any fixture. The code had never run.
+
+The tell was that the number was **too good**. A 200,000-entry table should cost several
+megabytes; 3.6 MB was not consistent with having loaded one. Checking took one command.
+
+With a real 400,000-entry table the honest figure is 26.9 MB. Still inside budget, but now
+it means something.
+
+## Then I did it again
+
+The README said peak memory "tracks the widest row, not the file size."
+
+That sentence describes what I designed, not what I measured. Rows do stream. But the
+string table is held fully in memory, and on a string-heavy workbook it *is* the memory
+profile — about 30 of the 39 MB. I shipped that claim in v0.1.0.
+
+The fix was to stop asserting and measure. Two workbooks, identical row and cell counts,
+differing only in how many *distinct* strings they hold:
+
+| Workbook | Cells | Distinct strings | Peak heap |
+|---|---|---|---|
+| `repeat.xlsx` | 1,000,000 | 100 | **3.5 MB** |
+| `large.xlsx` | 1,000,000 | 400,000 | **26.9 MB** |
+
+That is a better result than the claim I couldn't defend, and unlike the claim it can be
+falsified. A million cells in 3.5 MB shows rows are not accumulating. The gap between the
+two numbers is the string table and nothing else. Row count appears in neither.
+
+Both are now tests. The baseline one matters more: if row streaming ever regressed into
+accumulation, the string-heavy fixture would still look plausible while the repeating one
+blew past its budget.
+
+## The failure mode, again
+
+Two of my checks reported success while measuring nothing. They have the same shape as the
+four that did it yesterday:
+
+**A passing test proves the assertion held. It does not prove the code ran.**
+
+Yesterday's version was a check that could not distinguish "the thing is fine" from "I
+failed to look." This one could not distinguish "the code works" from "the code was never
+called." A test whose fixture doesn't reach the code under test passes for free, and it
+passes *faster*, and the speed reads as efficiency.
+
+What helps is the same thing that helped yesterday: compare against something that can
+actually differ. So the fixtures are now written by three independent tools, two of which
+store strings differently on purpose, and a test asserts that property directly —
+
+```go
+// If a regenerated fixture quietly stopped using the shared string table, the
+// string-table reader would go untested while every test still passed.
+for _, f := range []string{"sst.xlsx", "large.xlsx"} { ... }
+if hasPart("simple.xlsx", "xl/sharedStrings.xml") { t.Error(...) }
+```
+
+The same reasoning produced a negative control in the BIFF string test: it parses the same
+bytes *without* the continuation boundaries and asserts the result comes out **wrong**.
+Without it, an assertion that `"abcd" == "abcd"` can pass for reasons that have nothing to
+do with the code being right.
+
+## What the port actually cost
+
+The honest scorecard, because a post that only lists wins isn't worth reading:
+
+| | |
+|---|---|
+| Wrote it and it worked first run | `numfmt`, the xlsx reader, the CSV reader, the BIFF8 reader |
+| Cost real time | Fixtures that tested nothing; a memory claim I couldn't defend |
+| Deliberately not ported | xlsb, encryption, BIFF5 and earlier, `AsDataSet()` |
+| Deliberately not optimised | `unsafe.String` on the string blob — meets budget without it |
+
+Four subsystems landed green on the first test run. That is not a boast; it is the setup
+for the point. **The two things that went wrong were both in the layer that was supposed to
+tell me whether the code was right.** Being good at the hard part bought me nothing,
+because the part that failed was the verification.
+
+## The two details that were genuinely hard
+
+**A date is not a type.** A spreadsheet stores a date as a bare `float64`. Nothing in the
+cell says "date" — the only signal is a number format reached through the style table,
+three hops away. Break any hop and a delivery date becomes the number 45217. Worse,
+scanning the format string for `d`/`m`/`y` is not enough: a format like `"Paid on day "0.0`
+contains all of them inside a quoted literal. That one is a fixture now.
+
+**BIFF8's restated flags byte.** A record payload can't exceed 8224 bytes, so a large
+string table arrives as one record plus a run of `CONTINUE` records. Concatenate them and
+almost everything works. But when a *string* is split across a boundary, the first byte of
+the continuation is not text — it restates the compression flag. Miss it and the table
+doesn't fail; it silently desynchronises, and every string after that point comes back
+garbled. The fixture generator writes random-length strings specifically to force the case.
+
+## Where it beats the original, and where the comparison is unfair
+
+On the unfavourable input — 400,000 distinct strings, the worst case for this design:
+
+| Reader | Time | Peak RSS |
+|---|---|---|
+| **go-excel-reader** | **3.2 s** | **40 MB** |
+| ExcelDataReader 3.9.0 (.NET 9) | 3.3 s | 95 MB |
+| excelize v2.11.0 | 4.0 s | 221 MB |
+
+The excelize row is not like for like on time: its cursor returns strings and does less
+type resolution than the other two. Memory is the meaningful column, and the README says
+so rather than letting the time column imply something it shouldn't.
+
+The mechanism is one idea: the string table is stored as a single byte blob with an offset
+index instead of a `[]string`. For 400,000 entries that is two allocations and zero
+pointers instead of 400,000 of each — and the garbage collector never traces into a
+`[]byte`.
+
+## Deliberately not claimed
+
+- **No file in this project was written by Microsoft Excel.** Every fixture comes from
+  openpyxl, xlsxwriter or xlwt. The byte-for-byte parity with ExcelDataReader is real and
+  is much stronger evidence than my own tests, but it is not the same as being tested
+  against files Excel produced.
+- The "streams a 500 MB workbook" claim is a design property, not a measurement. The
+  largest file tested is 9.2 MB.
+- `golangci-lint` was not run; it wasn't installed. `go vet` and `staticcheck` are clean.
+- BIFF5 and earlier `.xls` are refused with a clear error rather than decoded. That is a
+  scope decision, not a capability.
+- One machine, one architecture, one Go version.
+
+## Read the actual work
+
+The chapters below are the engineering log in order, including both mistakes and the
+corrections. The decision log records what was ambiguous and what got traded away.
