@@ -1,0 +1,12 @@
+# The large fixtures are generated, not committed: together they are ~18 MB,
+# and testdata ships with the module, so committing them would make every
+# `go get` download them. Tests that need them skip when they are absent.
+# Regenerate with testdata/gen_fixtures.py -- see README.
+testdata/large.xlsx
+testdata/large.xls
+testdata/inline.xlsx
+
+# Local tooling
+.venv/
+*.out
+*.test
