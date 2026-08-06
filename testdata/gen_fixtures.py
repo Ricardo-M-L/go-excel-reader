@@ -224,6 +224,27 @@ def write_large_xlsx(path, rows=200_000):
     wb.close()
 
 
+def write_repeat_xlsx(path, rows=200_000):
+    """Same shape as large.xlsx, but with a tiny shared string table.
+
+    The two files have identical row and cell counts and differ only in how many
+    distinct strings they hold. Comparing them separates the cost of streaming
+    rows from the cost of the string table, which is the only part of the reader
+    whose memory grows with the file.
+    """
+    wb = xlsxwriter.Workbook(path, {"in_memory": True})
+    ws = wb.add_worksheet("Repeat")
+    pool = ["category-%d" % i for i in range(100)]
+    rnd = random.Random(1)
+    for i in range(rows):
+        ws.write_string(i, 0, rnd.choice(pool))
+        ws.write_string(i, 1, rnd.choice(pool))
+        ws.write_number(i, 2, i)
+        ws.write_number(i, 3, i * 1.5)
+        ws.write_boolean(i, 4, i % 2 == 0)
+    wb.close()
+
+
 def write_inline_xlsx(path, rows=2000):
     """A workbook whose strings are stored inline rather than shared."""
     wb = openpyxl.Workbook(write_only=True)
@@ -297,6 +318,7 @@ def main():
     if "--no-large" not in sys.argv:
         write_inline_xlsx(p("inline.xlsx"))
         write_large_xlsx(p("large.xlsx"))
+        write_repeat_xlsx(p("repeat.xlsx"))
         write_large_xls(p("large.xls"))
 
     for name in sorted(os.listdir(out)):

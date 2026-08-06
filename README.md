@@ -108,15 +108,34 @@ zone would make the same file decode differently on different machines.
 
 ## Memory
 
-The design goal is that peak memory tracks the widest row, not the file size.
-Two things make that work: worksheets are parsed as a token stream and never
-materialised, and the shared string table is stored as one contiguous byte blob
-with an offset index instead of a `[]string`. A `[]string` of 400,000 entries is
-400,000 separate allocations the garbage collector must trace on every cycle; a
-`[]byte` is one.
+Rows stream. Worksheets are parsed as an XML token stream and never
+accumulated, so row count does not affect peak memory. The shared string table
+is the one structure held fully in memory, and it is the only part that grows
+with the file.
 
-Measured on `testdata/large.xlsx` — 9.2 MB on disk, 200,000 rows, 1,000,000
-cells, with a 15.4 MB shared string table (peak RSS, best of two runs):
+The difference is measurable. These two workbooks have **identical** row and
+cell counts and differ only in how many distinct strings they contain:
+
+| Workbook | Rows | Cells | Distinct strings | Peak Go heap | Peak RSS |
+|---|---|---|---|---|---|
+| `repeat.xlsx` (5.3 MB) | 200,000 | 1,000,000 | 100 | **3.5 MB** | 9.1 MB |
+| `large.xlsx` (9.2 MB) | 200,000 | 1,000,000 | 400,000 | **26.9 MB** | 39.3 MB |
+
+A million cells decode in 3.5 MB of heap when the values repeat. Everything
+above that baseline is the string table. Since most real spreadsheets repeat
+their values heavily, memory usually stays near the baseline no matter how long
+the file is — and the row count never affects it at all.
+
+A test asserts the baseline, so a regression from streaming rows to accumulating
+them fails the build rather than quietly showing up as a bigger number.
+
+That table is stored as one contiguous byte blob with an offset index rather
+than a `[]string`. A `[]string` of 400,000 entries is 400,000 separate
+allocations the garbage collector must trace on every cycle; a `[]byte` is one.
+That is most of the difference below.
+
+Measured on `testdata/large.xlsx` — the unfavourable case above, with a 15.4 MB
+shared string table (peak RSS, best of two runs):
 
 | Reader | Time | Peak RSS |
 |---|---|---|
@@ -127,6 +146,11 @@ cells, with a 15.4 MB shared string table (peak RSS, best of two runs):
 The excelize figure is not quite like for like: its `Rows()` cursor returns
 strings, so it does less type resolution than the other two. The memory column
 is the meaningful comparison.
+
+One caveat worth stating plainly: this is not a constant-memory reader. A
+workbook with a very large number of *distinct* strings will hold that table in
+memory, and no amount of streaming elsewhere avoids it. What is avoided is
+paying three times over for it.
 
 ## Correctness
 

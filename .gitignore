@@ -5,6 +5,7 @@
 testdata/large.xlsx
 testdata/large.xls
 testdata/inline.xlsx
+testdata/repeat.xlsx
 
 # Local tooling
 .venv/

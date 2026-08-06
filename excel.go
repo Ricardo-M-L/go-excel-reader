@@ -5,9 +5,14 @@
 // golang.org/x/text.
 //
 // The cursor model is deliberately close to the original's IExcelDataReader:
-// advance a sheet, advance a row, read cells by column index. Nothing larger
-// than the current row is held in memory, so a 500MB workbook costs what its
-// widest row costs.
+// advance a sheet, advance a row, read cells by column index.
+//
+// Rows stream: worksheets are parsed as a token stream and never accumulated,
+// so the number of rows does not affect peak memory. The one structure held
+// fully in memory is the workbook's shared string table, which is why memory
+// scales with the number of distinct strings rather than with the file size.
+// A million cells drawn from a small set of values decode in roughly 9MB; the
+// same million cells with a distinct string in every one cost about 39MB.
 //
 //	r, err := excel.OpenFile("report.xlsx")
 //	if err != nil {

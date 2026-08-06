@@ -167,6 +167,36 @@ Both are additions the specification's own requirements imply. Worth stating
 explicitly rather than quietly widening an interface someone specified on
 purpose.
 
+## "Is it memory efficient" is the wrong question
+
+The first version of the README said peak memory "tracks the widest row, not the
+file size." That reads well and is not true. It went out in v0.1.0 and was
+corrected in v0.1.1.
+
+Rows genuinely do stream. But the shared string table is held fully resident, and
+on a string-heavy workbook it *is* the memory profile — about 30 of the 39 MB.
+The claim was describing the design intent rather than the measured behaviour.
+
+The fix was to measure instead of assert. Two workbooks with identical row and
+cell counts, differing only in how many distinct strings they hold:
+
+| Workbook | Cells | Distinct strings | Peak Go heap | Peak RSS |
+|---|---|---|---|---|
+| `repeat.xlsx` (5.3 MB) | 1,000,000 | 100 | 3.5 MB | 9.1 MB |
+| `large.xlsx` (9.2 MB) | 1,000,000 | 400,000 | 26.9 MB | 39.3 MB |
+
+That is a far better result than the original claim, and it is falsifiable. A
+million cells in 3.5 MB shows rows are not accumulating; the gap to 26.9 MB is
+the string table and nothing else. Row count does not appear in either number.
+
+Both budgets now have tests. The baseline one matters most: if row streaming ever
+regressed into accumulation, the string-heavy case would still look plausible
+while the repeating case blew past 20 MB.
+
+The general lesson, and the second time this project taught it: a number you did
+not measure is a claim, and a claim in a README is a claim you will eventually
+have to defend.
+
 ## Numbers
 
 | | `.xlsx` 9.2 MB / 1M cells | `.xls` 8.9 MB / 262k cells |
@@ -175,5 +205,5 @@ purpose.
 | ExcelDataReader | 3.3 s, 95 MB RSS | 1.15 s, 93 MB RSS |
 | excelize v2.11.0 | 4.0 s, 221 MB RSS | not supported |
 
-Peak heap measured from inside Go on the same xlsx: 26.9 MB against a 50 MB
-budget.
+The excelize comparison is not like for like on time: its `Rows()` cursor returns
+strings and does less type resolution. Memory is the meaningful column.

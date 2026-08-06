@@ -584,6 +584,69 @@ func TestXLSXLargeMemory(t *testing.T) {
 	}
 }
 
+// TestXLSXMemoryScalesWithStrings pins the reader's actual memory behaviour.
+//
+// repeat.xlsx and large.xlsx hold identical row and cell counts and differ only
+// in how many distinct strings they contain. Rows stream, so the row count
+// costs nothing; the shared string table is resident, so it costs everything.
+// Asserting the baseline separately from the table is what keeps the README's
+// claim honest: if row streaming ever regressed into accumulation, the repeat
+// case would blow past this budget while the large case still looked fine.
+func TestXLSXMemoryScalesWithStrings(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping memory test in short mode")
+	}
+
+	measure := func(t *testing.T, name string) (rows int, peak uint64) {
+		t.Helper()
+		path := fixture(name)
+		if _, err := os.Stat(path); err != nil {
+			t.Skipf("fixture %s unavailable: %v", name, err)
+		}
+
+		runtime.GC()
+		r, err := excel.OpenFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer r.Close()
+
+		for r.NextSheet() {
+			for r.Read() {
+				rows++
+				for i := 0; i < r.FieldCount(); i++ {
+					_ = r.GetValue(i)
+				}
+				if rows%10000 == 0 {
+					var m runtime.MemStats
+					runtime.ReadMemStats(&m)
+					if m.HeapAlloc > peak {
+						peak = m.HeapAlloc
+					}
+				}
+			}
+		}
+		if err := r.Err(); err != nil {
+			t.Fatal(err)
+		}
+		return rows, peak
+	}
+
+	rows, peak := measure(t, "repeat.xlsx")
+	t.Logf("repeat.xlsx: %d rows, 100 distinct strings, peak heap %.1f MB",
+		rows, float64(peak)/(1<<20))
+
+	// A million cells with a hundred distinct strings must stay near the
+	// streaming baseline. Accumulating rows would put this in the hundreds
+	// of megabytes.
+	const baselineBudget = 20 << 20
+	if peak > baselineBudget {
+		t.Errorf("peak heap %.1f MB exceeds the %d MB streaming baseline; "+
+			"rows are no longer streaming",
+			float64(peak)/(1<<20), baselineBudget>>20)
+	}
+}
+
 // TestXLSLargeSharedStrings exercises the BIFF shared string table across
 // CONTINUE record boundaries, where a split string restates its compression
 // flag. The fixture uses randomly sized strings so that the split lands mid
