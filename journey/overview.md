@@ -28,7 +28,7 @@ before this.
 
 ## The plan was good. The tests were the problem.
 
-Yesterday's project was about a plan that was confidently wrong about the codebase it
+My previous project was about a plan that was confidently wrong about the codebase it
 described. This time the plan was detailed and largely right. It named the record types,
 the magic bytes, the four RK encodings, and a gotchas table that was accurate.
 
@@ -136,11 +136,11 @@ known intentional differences.
 ## The failure mode, again
 
 Three times now, something reported success while measuring less than I thought. Same
-shape as the four that did it yesterday:
+shape as the four that did it on the last project:
 
 **A passing test proves the assertion held. It does not prove the code ran.**
 
-Yesterday's version was a check that could not distinguish "the thing is fine" from "I
+That project's version was a check that could not distinguish "the thing is fine" from "I
 failed to look." This one could not distinguish "the code works" from "the code was never
 called." A test whose fixture doesn't reach the code under test passes for free, and it
 passes *faster*, and the speed reads as efficiency.
@@ -149,7 +149,7 @@ The third instance was the twelve fixtures themselves. They agreed with the refe
 implementation perfectly, and they were twelve files I chose, which is a sample that
 cannot surprise me. The corpus could, and did, eight times.
 
-What helps is the same thing that helped yesterday: compare against something that can
+What helps is the same thing that helped last time: compare against something that can
 actually differ. So the fixtures are now written by three independent tools, two of which
 store strings differently on purpose, and a test asserts that property directly:
 

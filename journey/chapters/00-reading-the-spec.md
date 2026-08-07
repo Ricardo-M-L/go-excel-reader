@@ -2,7 +2,7 @@
 
 *2026-08-06. No parsing code yet. This is what happened before any.*
 
-Yesterday's lesson was to check a plan against reality before executing it. This plan held
+The last project's lesson was to check a plan against reality before executing it. This plan held
 up much better. It named the BIFF record numbers, the CFB magic bytes, the four RK
 encodings and a gotchas table that turned out to be accurate on every entry.
 
@@ -111,6 +111,6 @@ whether `GetInt` accepts a whole-numbered float, nothing fails.
 Nothing dramatic. One toolchain install, two interface methods, one package, one reorder.
 
 None of it needed spreadsheet expertise. It needed reading the spec as a document that
-could be wrong, rather than as instructions. The same move as yesterday, applied to a plan
+could be wrong, rather than as instructions. The same move as last time, applied to a plan
 that was mostly right. The errors were smaller because the plan was better. They were not
 zero, and the interface one would have shipped.

@@ -1,6 +1,7 @@
 # LinkedIn post
 
-Draft C is the current preference. It leads with intent rather than findings.
+Draft C is the current preference. It opens on why the project happened and
+closes on what carried over, rather than leading with a finding.
 A and B are more technical framings. None are posted.
 
 Links: writeup https://www.jonathanloor.com/go-excel-reader/ ·
@@ -17,16 +18,22 @@ across two projects than as one long post.
 
 ## Draft C: leads with the why (current preference)
 
-I spent a day porting a C# library to Go. The most useful twenty minutes came at
-the end, when I stopped grading my own work.
+My last project migrated a 2016-era .NET app to a view engine released three
+weeks earlier. The lesson was to check a plan before running it, and I wanted to
+know whether that survives a different problem.
 
-By evening it was published. Every test passed, static analysis was clean, and I
-had compared my output byte-for-byte against the original C# library on twelve
-test files. All twelve matched.
+It did not, quite. It got worse, and more specific.
+
+This time I ported a C# library to Go. It reads Excel files, a domain I knew
+nothing about, which is the point: I cannot bluff my way through a binary format
+I have never seen. By evening it was published. Every test passed, static
+analysis was clean, and I had compared my output byte-for-byte against the
+original C# library on twelve test files. All twelve matched.
 
 So I wrote in the README that the output was identical to the original.
 
-It was identical on twelve files I chose myself. That is a much weaker claim.
+It was identical on twelve files I chose myself. That is a much weaker claim, and
+noticing the difference is the only skill this project was really testing.
 
 The original ships 379 test spreadsheets of its own, a decade of regression
 files, each added because it broke something for somebody. Running against all
@@ -49,15 +56,15 @@ two-kilobyte file asked my library for a seventeen-gigabyte allocation and kille
 the process.
 
 The two approaches found completely different things. The corpus found errors of
-meaning, and every one of them needed a real file made by real software. The
-fuzzer found an error of safety, a number I had trusted without asking whether it
-could be true. Neither would have found the other's.
+meaning, and every one needed a real file made by real software. The fuzzer found
+an error of safety, a number I had trusted without asking whether it could be
+true. Neither would have found the other's.
 
 229 of the 303 files now decode byte-identically, 14 disagree and are written
 down, and zero parse in mine that the original refuses.
 
-Written up with the corrections, because the version where everything goes
-smoothly is not useful to anyone.
+Two projects in, the thing that transfers is not knowing the stack. It is being
+willing to check whether your own work is as good as it looks.
 
 Writing is AI assisted. Thoughts and publishing are human-gated.
 
