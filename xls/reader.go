@@ -511,22 +511,39 @@ func (r *Reader) readFollowingString() (string, error) {
 
 // numericCell types a stored double using the cell's number format.
 func (r *Reader) numericCell(xf uint16, v float64) cells.Cell {
+	raw := formatFloat(v)
+	format := r.numberFormatXF(int(xf))
 	// A date format on an out-of-range serial is a formatting accident, not a
 	// date. Converting anyway produces a confident absurdity.
 	if r.isDateXF(int(xf)) && numfmt.SerialInRange(v) {
-		return cells.Cell{Value: numfmt.SerialToTime(v, r.date1904), Raw: formatFloat(v)}
+		return cells.Number(numfmt.SerialToTime(v, r.date1904), raw, format, r.date1904)
 	}
 	// A whole number is returned as int64 so that a column of counts reads the
 	// same here as it does from an xlsx, where the file's own text distinguishes
 	// integers from decimals. BIFF has no such text, so the value itself decides.
 	if v == math.Trunc(v) && !math.IsInf(v, 0) && math.Abs(v) < 1<<53 {
 		n := int64(v)
-		return cells.Cell{Value: n, Raw: strconv.FormatInt(n, 10)}
+		return cells.Number(n, strconv.FormatInt(n, 10), format, r.date1904)
 	}
-	return cells.Cell{Value: v, Raw: formatFloat(v)}
+	return cells.Number(v, raw, format, r.date1904)
 }
 
 func formatFloat(v float64) string { return strconv.FormatFloat(v, 'g', -1, 64) }
+
+// numberFormatXF resolves a cell's format index to its display format code.
+func (r *Reader) numberFormatXF(xf int) string {
+	if xf < 0 || xf >= len(r.xfNumFmt) {
+		return ""
+	}
+	id := r.xfNumFmt[xf]
+	if code, ok := r.formats[id]; ok {
+		return code
+	}
+	if code, ok := numfmt.Builtin(id); ok {
+		return code
+	}
+	return ""
+}
 
 // isDateXF resolves a cell's format index to whether it denotes a date.
 func (r *Reader) isDateXF(xf int) bool {

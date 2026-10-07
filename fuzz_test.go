@@ -92,7 +92,9 @@ func FuzzOpenReader(f *testing.F) {
 					_, _ = r.GetBool(i)
 					_, _ = r.GetTime(i)
 					_ = r.IsEmpty(i)
-					_, _ = r.Cell(i)
+					if cell, ok := r.Cell(i); ok {
+						_ = cell.FormattedValue()
+					}
 				}
 				// Out-of-range access must be an absence, never a panic.
 				_ = r.GetValue(-1)

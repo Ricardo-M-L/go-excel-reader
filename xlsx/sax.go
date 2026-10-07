@@ -355,8 +355,9 @@ func (r *Reader) makeCell(raw, typ string, styleIdx int) cells.Cell {
 		if err != nil {
 			return cells.Cell{Value: raw, Raw: raw}
 		}
+		format := r.styles.NumFmt(styleIdx)
 		if styleIdx >= 0 && r.styles.IsDate(styleIdx) && numfmt.SerialInRange(f) {
-			return cells.Cell{Value: numfmt.SerialToTime(f, r.date1904), Raw: raw}
+			return cells.Number(numfmt.SerialToTime(f, r.date1904), raw, format, r.date1904)
 		}
 		// Prefer int64 when the file wrote a whole number. Excel stores every
 		// number as a double, but a caller reading a row of counts should not
@@ -364,10 +365,10 @@ func (r *Reader) makeCell(raw, typ string, styleIdx int) cells.Cell {
 		// fractional part was intended.
 		if isIntegerLiteral(raw) {
 			if n, err := strconv.ParseInt(raw, 10, 64); err == nil {
-				return cells.Cell{Value: n, Raw: raw}
+				return cells.Number(n, raw, format, r.date1904)
 			}
 		}
-		return cells.Cell{Value: f, Raw: raw}
+		return cells.Number(f, raw, format, r.date1904)
 	}
 }
 

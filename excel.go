@@ -45,7 +45,8 @@ import (
 	"github.com/jloor/go-excel-reader/xlsx"
 )
 
-// Cell is a single parsed cell: a Go-typed Value and the Raw text it came from.
+// Cell is a single parsed cell: a Go-typed Value, the Raw text it came from,
+// and a FormattedValue method that reproduces its spreadsheet display text.
 type Cell = cells.Cell
 
 // Row is one row of cells.

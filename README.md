@@ -78,7 +78,7 @@ func Detect(rs io.ReadSeeker) (Format, error)
 | `GetValue(col) any` | `string`, `int64`, `float64`, `bool`, `time.Time` or `nil` |
 | `GetString/GetFloat/GetInt/GetBool/GetTime(col)` | typed value plus an ok flag |
 | `IsEmpty(col) bool` | whether the cell holds no value |
-| `Cell(col) (Cell, bool)` | typed value **and** the raw text it came from |
+| `Cell(col) (Cell, bool)` | typed value, raw stored text, and `FormattedValue()` for display text |
 | `RowIndex() int` | zero-based row index, counting rows the file omitted |
 | `Err() error` | first error encountered while streaming |
 | `Close() error` | release resources |
@@ -105,6 +105,12 @@ lands as one or the other depends on how the file happened to be written.
 
 Dates are returned in UTC. Excel serials carry no timezone, so attaching a local
 zone would make the same file decode differently on different machines.
+
+`Cell.FormattedValue()` applies the workbook's number format without changing
+the typed value returned by `GetValue`. For example, a stored number `123` with
+format `00000` returns `int64(123)` from `GetValue` and `"00123"` from
+`FormattedValue`. Percentage, currency, date/time, scientific, conditional,
+and custom formats use the same formatter exposed by the `numfmt` package.
 
 ## Memory
 

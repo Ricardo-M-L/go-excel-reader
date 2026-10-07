@@ -55,6 +55,13 @@ DATE_FORMATS = [
     ("[$-409]mmmm d, yyyy", datetime.datetime(2021, 7, 4)),
 ]
 
+FORMATTED_CELLS = [
+    ("leading-zero", 123, "00000"),
+    ("percentage", 0.125, "0.00%"),
+    ("currency", 1234.5, "$#,##0.00"),
+    ("date", datetime.datetime(2024, 7, 9), "yyyy-mm-dd"),
+]
+
 
 def write_simple_xlsx(path):
     wb = openpyxl.Workbook()
@@ -169,6 +176,29 @@ def write_dates_xlsx(path):
     ws.cell(row=len(DATE_FORMATS) + 2, column=1, value="not-a-date")
     trap = ws.cell(row=len(DATE_FORMATS) + 2, column=2, value=1234.5)
     trap.number_format = '"Paid on day "0.0'
+    wb.save(path)
+
+
+def write_formatted_xlsx(path):
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Formatted"
+    ws.append(["kind", "value"])
+    for row, (kind, value, number_format) in enumerate(FORMATTED_CELLS, start=2):
+        ws.cell(row=row, column=1, value=kind)
+        cell = ws.cell(row=row, column=2, value=value)
+        cell.number_format = number_format
+    wb.save(path)
+
+
+def write_formatted_xls(path):
+    wb = xlwt.Workbook()
+    ws = wb.add_sheet("Formatted")
+    ws.write(0, 0, "kind")
+    ws.write(0, 1, "value")
+    for row, (kind, value, number_format) in enumerate(FORMATTED_CELLS, start=1):
+        ws.write(row, 0, kind)
+        ws.write(row, 1, value, xlwt.easyxf(num_format_str=number_format))
     wb.save(path)
 
 
@@ -312,6 +342,8 @@ def main():
     write_multisheet_xlsx(p("multisheet.xlsx"))
     write_multisheet_xls(p("multisheet.xls"))
     write_dates_xlsx(p("dates.xlsx"))
+    write_formatted_xlsx(p("formatted.xlsx"))
+    write_formatted_xls(p("formatted.xls"))
     write_gaps_xlsx(p("gaps.xlsx"))
     write_sst_xlsx(p("sst.xlsx"))
     write_csv_variants(out)

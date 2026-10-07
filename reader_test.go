@@ -60,6 +60,30 @@ func drain(t *testing.T, r excel.Reader) []sheet {
 	return out
 }
 
+func drainFormatted(t *testing.T, r excel.Reader) []sheet {
+	t.Helper()
+	var out []sheet
+	for r.NextSheet() {
+		s := sheet{name: r.SheetName()}
+		for r.Read() {
+			row := make([]any, r.FieldCount())
+			for i := range row {
+				cell, ok := r.Cell(i)
+				if !ok {
+					t.Fatalf("Cell(%d) is out of range", i)
+				}
+				row[i] = cell.FormattedValue()
+			}
+			s.rows = append(s.rows, row)
+		}
+		out = append(out, s)
+	}
+	if err := r.Err(); err != nil {
+		t.Fatalf("streaming error: %v", err)
+	}
+	return out
+}
+
 func openFixture(t *testing.T, name string) excel.Reader {
 	t.Helper()
 	r, err := excel.OpenFile(fixture(name))
@@ -276,6 +300,29 @@ func TestXLSXDates(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got[0].rows, want) {
 		t.Errorf("rows mismatch:\n got %#v\nwant %#v", got[0].rows, want)
+	}
+}
+
+func TestFormattedValues(t *testing.T) {
+	want := [][]any{
+		{"kind", "value"},
+		{"leading-zero", "00123"},
+		{"percentage", "12.50%"},
+		{"currency", "$1,234.50"},
+		{"date", "2024-07-09"},
+	}
+
+	for _, name := range []string{"formatted.xlsx", "formatted.xls"} {
+		t.Run(name, func(t *testing.T) {
+			got := drainFormatted(t, openFixture(t, name))
+			if len(got) != 1 || !reflect.DeepEqual(got[0].rows, want) {
+				t.Errorf("formatted rows mismatch:\n got %#v\nwant %#v", got, want)
+			}
+		})
+	}
+
+	if got := (excel.Cell{Raw: "#DIV/0!"}).FormattedValue(); got != "#DIV/0!" {
+		t.Errorf("formatted formula error = %q, want #DIV/0!", got)
 	}
 }
 

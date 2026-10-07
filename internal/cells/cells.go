@@ -9,7 +9,11 @@ package cells
 
 import (
 	"math"
+	"strconv"
+	"strings"
 	"time"
+
+	"github.com/jloor/go-excel-reader/numfmt"
 )
 
 // Cell is a single parsed cell.
@@ -25,10 +29,46 @@ import (
 type Cell struct {
 	Value any
 	Raw   string
+
+	numberFormat string
+	date1904     bool
 }
 
 // IsEmpty reports whether the cell holds no value.
 func (c Cell) IsEmpty() bool { return c.Value == nil }
+
+// Number builds a numeric cell with the format metadata needed to reproduce
+// the text Excel displays without changing the cell's typed Value.
+func Number(value any, raw, numberFormat string, date1904 bool) Cell {
+	return Cell{Value: value, Raw: raw, numberFormat: numberFormat, date1904: date1904}
+}
+
+// FormattedValue returns the text Excel displays for the cell. Numeric cells
+// use their workbook number format; other cell types use their natural display
+// representation. Formula errors remain available here even when Value is nil.
+func (c Cell) FormattedValue() string {
+	if c.numberFormat != "" {
+		if value, err := strconv.ParseFloat(strings.TrimSpace(c.Raw), 64); err == nil {
+			return numfmt.FormatValueIn(value, c.numberFormat, c.date1904)
+		}
+	}
+
+	switch value := c.Value.(type) {
+	case nil:
+		return c.Raw
+	case string:
+		return value
+	case bool:
+		return strings.ToUpper(strconv.FormatBool(value))
+	case time.Time:
+		return value.Format(time.RFC3339)
+	default:
+		if c.Raw != "" {
+			return c.Raw
+		}
+		return ""
+	}
+}
 
 // Source is the format-specific engine that sits behind a public Reader.
 //
